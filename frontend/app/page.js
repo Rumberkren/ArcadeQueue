@@ -32,19 +32,25 @@ import {
 // coord define the central point of allowed editing area
 // only users within MAX_DISTANCE_KM can edit the queue
 
-// local for testing
-// const TARGET_LAT = -6.265856; // Altitude not used in distance calc
-// const TARGET_LON = 106.944008; // Altitude not used in distance calc
-
-// Amborukmo Plaza
-const TARGET_LAT = -7.782357; 
-const TARGET_LON = 110.401167;
-
-// DP Mall Semarang 
-// const TARGET_LAT = -6.982970;
-// const TARGET_LON = 110.412266;
-
-const MAX_DISTANCE_KM = 99999; // 500 m radius
+const LOCATIONS = [
+  { 
+    name: 'Amborukmo Plaza', 
+    lat: -7.782357, 
+    lon: 110.401167, 
+    radius_km: 0.5
+  }, {
+    name: 'DP Mall Semarang',
+    lat: -6.982970,
+    lon: 110.412266,
+    radius_km: 0.5
+  }, 
+  {
+    name: 'Local Testing',
+    lat: -6.265856,
+    lon: 106.944008,
+    radius_km: 0.5
+  },
+]
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL; // Base URL for API
 
@@ -68,6 +74,13 @@ export default function ArcadeQueueApp() {
   const [p2Name, setP2Name] = useState('');
   const [isAddingCabinet, setIsAddingCabinet] = useState(false); // Controls visibility of "Add Cabinet" form
   const [newCabinetName, setNewCabinetName] = useState('');
+
+  // Guard safe
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevent multiple submissions
+
+  // Polling 
+  const [queuePoll, setQueuePoll] = useState([]); // Current queue for the selected cabinet
+  const [isLoading, setIsLoading] = useState(false); // Loading state for API calls
 
   // Geolocation State
   const [canEdit, setCanEdit] = useState(false); // Whether the user can edit based on location, True is whenever user is within the allowed area
@@ -145,24 +158,59 @@ export default function ArcadeQueueApp() {
       return;
     }
 
+    // R1 - single location
+    // navigator.geolocation.getCurrentPosition(
+      
+    //   (position) => {
+       
+      
+      //   const { latitude: userLat, longitude: userLon } = position.coords;
+      //   const distance = calculateDistance(
+      //     userLat, userLon, TARGET_LAT, TARGET_LON
+      //   );
+
+      //   const isWithinRange = distance <= MAX_DISTANCE_KM;
+      //   setCanEdit(isWithinRange);
+
+      //   if (isWithinRange) {
+      //     setLocationStatus(`You are within the allowed area [ ${distance.toFixed(3)} km ]. | Editing enabled.`);
+      //   } else {
+      //     setLocationStatus(`You are outside the allowed area [ ${distance.toFixed(3)} km ]. Editing disabled.`);
+      //   }
+      // }, 
+
+    // R2 - multiple locations
     navigator.geolocation.getCurrentPosition(
       
       (position) => {
-        
-        const { latitude: userLat, longitude: userLon } = position.coords;
-        const distance = calculateDistance(
-          userLat, userLon, TARGET_LAT, TARGET_LON
-        );
+        const { latitude, longitude } = position.coords;
 
-        const isWithinRange = distance <= MAX_DISTANCE_KM;
-        setCanEdit(isWithinRange);
+        const mathcedLocation = LOCATIONS.find((loc) => {
+          const distance = calculateDistance(
+            latitude,
+            longitude,
+            loc.lat,
+            loc.lon
+          );
+          return distance <= loc.radius_km;
+        });
 
-        if (isWithinRange) {
-          setLocationStatus(`You are within the allowed area [ ${distance.toFixed(3)} km ]. | Editing enabled.`);
+        if (mathcedLocation) {
+          const distance = calculateDistance(
+            latitude,
+            longitude,
+            mathcedLocation.lat,
+            mathcedLocation.lon
+          );
+
+          setCanEdit(true);
+          setLocationStatus(`You are within play area [ ${distance.toFixed(3)} km ].`);
         } else {
-          setLocationStatus(`You are outside the allowed area [ ${distance.toFixed(3)} km ]. Editing disabled.`);
+          setCanEdit(false);
+          setLocationStatus(`You are outside the allowed areas. Editing disabled.`);
         }
-      }, 
+      },
+
       (error) => {
 
         // Handle geolocation errors
@@ -209,21 +257,45 @@ export default function ArcadeQueueApp() {
     return null;
   }, [selectedCabinet]);
 
+  const fetchQueue = useCallback(async () => {
+
+    try {
+      setIsLoading(true);
+      const response = await axios.get(CABINET_API_URL);
+      setQueuePoll(response.data);
+    } catch (error) {
+      console.error('Error fetching queue poll:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   // --- Initial setup and data fetching ---
 
   // Runs once on component mount and check location
   useEffect(() => {
+    
     fetchCabinets();
+    fetchQueue();
     checkGeolocation();
-    // Check DB connection on mount
-    checkDbHealth();
+    checkDbHealth(); // check DB health on load
+    
     // Set up periodic health check every 7 minutes 27 seconds
     const healthInterval = setInterval(checkDbHealth, 447000);
-    return () => clearInterval(healthInterval);
-  }, [checkGeolocation, checkDbHealth]);
+    const geolocationInterval = setInterval(checkGeolocation, 60000); // Re-check geolocation every minute
+    const queueInterval = setInterval(fetchQueue, 5000); // Poll every 5 seconds
+    
+    return () => {
+
+      clearInterval(healthInterval);
+      clearInterval(queueInterval);
+      clearInterval(geolocationInterval);
+    };
+  }, [fetchQueue, checkGeolocation, checkDbHealth]);
 
   // Fetch all cabinets
   const fetchCabinets = async () => {
+    
     try {
       const response = await axios.get(CABINET_API_URL);
       console.debug('fetchCabinets response', { status: response.status, headers: response.headers, data: response.data });
@@ -278,7 +350,7 @@ export default function ArcadeQueueApp() {
   // Add a new cabinet via API Call
   const addCabinet = async () => {
     
-    if (!canEdit || !newCabinetName.trim()) return;
+    if (!canEdit || !newCabinetName.trim() || isSubmitting) return;
     try {
       const resp = await axios.post(CABINET_API_URL, { name: newCabinetName });
       console.debug('addCabinet response', { status: resp.status, data: resp.data, headers: resp.headers });
@@ -287,6 +359,8 @@ export default function ArcadeQueueApp() {
       await fetchCabinets(); // Refresh cabinets after adding  
     } catch (error) {
       logAxiosDebug(error, 'addCabinet');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -311,7 +385,7 @@ export default function ArcadeQueueApp() {
   // adds a new entry to the queue
   const addToQueue = async () => {
     
-    if (!canEdit || !p1Name.trim() || !selectedCabinetId) return;
+    if (!canEdit || !p1Name.trim() || !selectedCabinetId || isSubmitting) return;
     if (newEntryType === 'duo' && !p2Name.trim()) return;
     try {
       await axios.post(QUEUE_API_URL, {
@@ -324,6 +398,8 @@ export default function ArcadeQueueApp() {
       resetForm();
     } catch (error) {
       console.error('Error adding to queue:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

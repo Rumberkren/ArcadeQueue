@@ -24,7 +24,7 @@ class CabinetController extends Controller
             'name' => 'required|string|max:255',
         ]);
         
-        return Cabinet::create([
+        return Cabinet::firstOrCreate([
             'name' => $request->name,
         ]);
     }
@@ -46,7 +46,10 @@ class CabinetController extends Controller
         // use a tansaction to ensure data integrity
         DB::transaction(function() use ($request) {
 
-            $items = QueueItem::whereIn('id', $request->new_order)->get();
+            $items = QueueItem::whereIn('id', $request->new_order)
+                ->lockForUpdate()
+                ->get();
+                
             $positions = $items->pluck('position')->sort()->values();
 
             foreach($request->new_order as $index => $itemId) {

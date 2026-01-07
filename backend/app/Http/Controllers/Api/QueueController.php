@@ -30,7 +30,7 @@ class QueueController extends Controller
         $maxPosition = QueueItem::where('cabinet_id', $request->cabinet_id)->max('position') ?? 0;
 
         // create new queue item
-        $item = QueueItem::create([
+        $item = QueueItem::firstOrCreate([
             'cabinet_id' => $request->cabinet_id,
             'type' => $request->type,
             'players' => $request->players,
