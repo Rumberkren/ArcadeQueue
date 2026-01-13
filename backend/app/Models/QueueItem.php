@@ -15,6 +15,7 @@ class QueueItem extends Model
         'position',
         'is_playing',
         'cabinet_id',
+        'request_hash',
     ];
 
     // ensure 'players' is cast to an array

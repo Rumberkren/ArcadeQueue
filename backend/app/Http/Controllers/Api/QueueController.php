@@ -20,58 +20,208 @@ class QueueController extends Controller
     // add a new item to the queue
     public function store(Request $request) {
 
-        // validate input 
-        $request->validate([
+        $validated = $request->validate([
             'cabinet_id' => 'required|exists:cabinets,id',
-            'type' => 'required',
-            'players' => 'required',
+            'type' => 'required|in:solo,duo',
+            'players' => 'required|array|min:1|max:2',
         ]);
 
-        $maxPosition = QueueItem::where('cabinet_id', $request->cabinet_id)->max('position') ?? 0;
+        // $maxPosition = QueueItem::where('cabinet_id', $request->cabinet_id)->max('position') ?? 0;
 
-        // create new queue item
-        $item = QueueItem::firstOrCreate([
-            'cabinet_id' => $request->cabinet_id,
-            'type' => $request->type,
-            'players' => $request->players,
-            'position' => $maxPosition + 1,
-        ]);
+        // create new queue item 
+        // R1
+        // $item = QueueItem::firstOrCreate([
+        //     'cabinet_id' => $request->cabinet_id,
+        //     'type' => $request->type,
+        //     'players' => $request->players,
+        //     'position' => $maxPosition + 1,
+        // ]);
+        
+        // R2
+        // Normalize players
+        $players = collect($validated['players'])
+            ->map(fn ($p) => trim(strtolower($p)))
+            ->sort()
+            ->values()
+            ->toArray();
 
-        return response()->json($item, 201);
+        // Deterministic hash
+        $requestHash = hash('sha256', json_encode([
+            'cabinet_id' => $validated['cabinet_id'],
+            'type' => $validated['type'],
+            'players' => $players,
+        ]));
+
+        try {
+            $item = DB::transaction(function () use ($validated, $players, $requestHash) {
+
+                // First try to get existing (FAST PATH)
+                $existing = QueueItem::where('request_hash', $requestHash)->first();
+                if ($existing) {
+                    return $existing;
+                }
+
+                // Lock cabinet rows to prevent race
+                $maxPosition = QueueItem::where('cabinet_id', $validated['cabinet_id'])
+                    ->lockForUpdate()
+                    ->max('position') ?? 0;
+
+                return QueueItem::create([
+                    'cabinet_id'   => $validated['cabinet_id'],
+                    'type'         => $validated['type'],
+                    'players'      => $players,
+                    'position'     => $maxPosition + 1,
+                    'request_hash' => $requestHash,
+                ]);
+            });
+
+            return response()->json($item, 201);
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            // UNIQUE constraint fallback (race condition safety)
+            $existing = QueueItem::where('request_hash', $requestHash)->first();
+
+            if ($existing) {
+                return response()->json($existing, 200);
+            }
+
+            throw $e; // real error
+        }
+    
     }
 
     // cycle the position of a queue item to the end
     public function cycle($id) {
 
         // find the item
-        $item = QueueItem::find($id);
-        if($item) {
+        // R1
+        // $item = QueueItem::find($id);
+        // if($item) {
             
+        //     // find current max/last position
+        //     $maxPosition = QueueItem::where('cabinet_id', $item->cabinet_id)->max('position');
+
+        //     // update this item's position to be last
+        //     $item->position = $maxPosition + 1;
+        //     $item->save();
+        // }
+
+        // R2 - do it in a transaction
+        DB::transaction(function () use ($id) {
+
+            $item = QueueItem::lockForUpdate()->find($id);
+            if(!$item) return;
+                
             // find current max/last position
-            $maxPosition = QueueItem::where('cabinet_id', $item->cabinet_id)->max('position');
+            $maxPosition = QueueItem::where('cabinet_id', $item->cabinet_id)
+                ->lockForUpdate()
+                ->max('position');
 
             // update this item's position to be last
-            $item->position = $maxPosition + 1;
-            $item->save();
-        }
+            $item->update([
+                'position' => $maxPosition + 1,
+            ]);
+            
+        });
         
         return response()->json([ 'message' => 'Cycled' ], 200);
     }
 
     public function move(Request $request, $id) {
 
-        $item = QueueItem::find($id); // find item by id
-        $newCabinetId = $request->target_cabinet_id; // target cabinet id from request
+        // R1
+        // $item = QueueItem::find($id); // find item by id
+        // $newCabinetId = $request->target_cabinet_id; // target cabinet id from request
     
-        if($item && $newCabinetId) {
+        // if($item && $newCabinetId) {
+        //     // find current max/last position in target cabinet
+        //     $maxPosition = QueueItem::where('cabinet_id', $newCabinetId)->max('position') ?? 0;
+
+        //     // update this item's cabinet and position to be last in target cabinet
+        //     $item->cabinet_id = $newCabinetId;
+        //     $item->position = $maxPosition + 1;
+        //     $item->save();
+        // }
+
+        // R2 - do it in a transaction
+        $request->validate([
+            'target_cabinet_id' => 'required|exists:cabinets,id',
+        ]);
+
+        DB::transaction(function () use ($id, $request) {
+
+            $item = QueueItem::lockForUpdate()->find($id);
+            if(!$item) return;
+
             // find current max/last position in target cabinet
-            $maxPosition = QueueItem::where('cabinet_id', $newCabinetId)->max('position') ?? 0;
+            $maxPosition = QueueItem::where('cabinet_id', $request->target_cabinet_id)
+                ->lockForUpdate()
+                ->max('position') ?? 0;
 
             // update this item's cabinet and position to be last in target cabinet
-            $item->cabinet_id = $newCabinetId;
-            $item->position = $maxPosition + 1;
-            $item->save();
+            $item->update([
+                'cabinet_id' => $request->target_cabinet_id,
+                'position' => $maxPosition + 1,
+            ]);
+        });
+
+        return response()->json([ 'message' => 'Moved' ], 200);
+    }
+
+    // update players
+    public function update(Request $request, $id){
+        
+        if (!$request->has('players')) {
+            return response()->json(['message' => 'Nothing to update'], 400);
         }
+
+        $validated = $request->validate([
+            'players' => 'required|array|min:1|max:2',
+        ]);
+
+        // Normalize players
+        $players = collect($validated['players'])
+            ->map(fn ($p) => trim(strtolower($p)))
+            ->sort()
+            ->values()
+            ->toArray();
+
+        $item = DB::transaction(function () use ($id, $players) {
+
+            $item = QueueItem::lockForUpdate()->find($id);
+            if (!$item) {
+                return null;
+            }
+
+            // Recalculate hash (must match store logic)
+            $newHash = hash('sha256', json_encode([
+                'cabinet_id' => $item->cabinet_id,
+                'type' => $item->type,
+                'players' => $players,
+            ]));
+
+            // Check if this edit would collide with another row
+            $collision = QueueItem::where('request_hash', $newHash)
+                ->where('id', '!=', $item->id)
+                ->exists();
+
+            if ($collision) {
+                throw new \Exception('Duplicate queue entry detected');
+            }
+
+            $item->update([
+                'players' => $players,
+                'request_hash' => $newHash,
+            ]);
+
+            return $item;
+        });
+
+        if (!$item) {
+            return response()->json(['message' => 'Queue item not found'], 404);
+        }
+
+        return response()->json($item, 200);
     }
 
     public function destroy($id) {

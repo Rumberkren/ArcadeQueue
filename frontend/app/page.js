@@ -4,7 +4,7 @@
 // This application manages player queues for arcade cabinets 
 // restricting editing access based on the user's geolocation location.
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { 
   
@@ -24,7 +24,9 @@ import {
   Lock,
   Unlock,
   AlertTriangle,
-  Database
+  Database,
+  Trophy,
+  RefreshCw,
 
 } from 'lucide-react'; // Icon library
 
@@ -33,22 +35,29 @@ import {
 // only users within MAX_DISTANCE_KM can edit the queue
 
 const LOCATIONS = [
+  
   { 
     name: 'Amborukmo Plaza', 
     lat: -7.782357, 
     lon: 110.401167, 
-    radius_km: 0.5
+    radius_km: 0.15
   }, {
     name: 'DP Mall Semarang',
     lat: -6.982970,
     lon: 110.412266,
-    radius_km: 0.5
-  }, 
+    radius_km: 0.15
+  },
+  {
+    name: 'Summarecon Mall Bekasi',
+    lat: -6.226771,
+    lon: 107.00069,
+    radius_km: 0.15
+  },
   {
     name: 'Local Testing',
     lat: -6.265856,
     lon: 106.944008,
-    radius_km: 0.5
+    radius_km: 0.15
   },
 ]
 
@@ -63,6 +72,8 @@ export default function ArcadeQueueApp() {
   // --- State Management ---
   const [cabinets, setCabinets] = useState([]); // ARRAY of all cabinet objects, including their queues
   const [selectedCabinetId, setSelectedCabinetId] = useState(null); // Selected cabinet ID
+  const [currentSessionPoll, setCurrentSessionPoll] = useState(null); // Current session polled separately
+  const isSubmittingQueueRef = useRef(false); // Ref to track if a queue submission is in progress
   
   // Drag State
   const [draggedItemIndex, setDraggedItemIndex] = useState(null); // Index of the currently dragged item
@@ -204,10 +215,10 @@ export default function ArcadeQueueApp() {
           );
 
           setCanEdit(true);
-          setLocationStatus(`You are within play area [ ${distance.toFixed(3)} km ].`);
+          setLocationStatus(`Inside Play Area [${distance.toFixed(3)} km].`);
         } else {
           setCanEdit(false);
-          setLocationStatus(`You are outside the allowed areas. Editing disabled.`);
+          setLocationStatus(`Outside Play Area. View-only mode.`);
         }
       },
 
@@ -257,18 +268,109 @@ export default function ArcadeQueueApp() {
     return null;
   }, [selectedCabinet]);
 
-  const fetchQueue = useCallback(async () => {
+  // const fetchQueue = useCallback(async () => {
+    
+    // try {
+      //   setIsLoading(true);
+      //   const response = await axios.get(CABINET_API_URL);
+      //   setQueuePoll(response.data);
+      // } catch (error) {
+        //   console.error('Error fetching queue poll:', error);
+        // } finally {
+          //   setIsLoading(false);
+          // }
+          
+    const fetchQueue = useCallback(async (cabinetId, silent = false) => {
+      if (!cabinetId) return;
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/queue/${cabinetId}`);
+        const { queue_items, current_session } = response.data;
+
+        const validatedQueue = (queue_items || []).map(item => ({
+          id: item.id,
+          players: item.players ? JSON.parse(item.players) : [],
+          type: item.type,
+          isNext: !!item.is_next,
+          order: item.order
+        }));
+
+        setQueuePoll(validatedQueue);
+        setCurrentSessionPoll(current_session);
+        if(!silent) setStatusMessage({ type: 'success', text: 'Queue updated.' });
+      } catch (error) {
+        if(!silent) setStatusMessage({ type: 'error', text: 'Failed to fetch queue.' });
+      }
+  }, []);
+
+  // Fetch all cabinets
+  // R1
+  // const fetchCabinets = async () => {
+    
+    
+    // try {
+    //   const response = await axios.get(CABINET_API_URL);
+    //   console.debug('fetchCabinets response', { status: response.status, headers: response.headers, data: response.data });
+    //   const data = response.data;
+
+    //   // Normalize several common response shapes:
+    //   // - []
+    //   // - { data: [] }
+    //   // - { cabinets: [] }
+    //   // - single object -> convert to [obj]
+    //   let parsed = [];
+
+    //   if (Array.isArray(data)) {
+    //     parsed = data;
+    //   } else if (data && Array.isArray(data.data)) {
+    //     parsed = data.data;
+    //   } else if (data && Array.isArray(data.cabinets)) {
+    //     parsed = data.cabinets;
+    //   } else if (data && typeof data === 'object') {
+    //     // Sometimes API returns a single cabinet object when there's only one
+    //     // or returns a keyed object. Try to detect an object with id/name.
+    //     if (data.id && data.name) {
+    //       parsed = [data];
+    //     } else {
+    //       // last resort: try to extract any array value from the object
+    //       const firstArray = Object.values(data).find(v => Array.isArray(v));
+    //       if (firstArray) parsed = firstArray;
+    //     }
+    //   }
+
+    //   if (Array.isArray(parsed)) {
+    //     console.debug('fetchCabinets parsed array length', parsed.length);
+    //     setCabinets(parsed);
+    //     // Auto-select the first cabinet if none selected
+    //     if (parsed.length > 0 && !selectedCabinetId) {
+    //       setSelectedCabinetId(parsed[0].id);
+    //     }
+    //   } else {
+    //     console.error('API returned unexpected data for cabinets:', data);
+    //     console.debug('fetchCabinets - attempted parsed value:', parsed);
+    //     setCabinets([]);
+    //   }
+    // } catch (error) {
+    //   // Network/ CORS / server HTML response will be caught here
+    //   logAxiosDebug(error, 'fetchCabinets');
+    //   setCabinets([]); // Reset to empty array on error
+    // }
+
+    // R2 - simplified
+  const fetchCabinets = useCallback(async ()  => {
 
     try {
-      setIsLoading(true);
-      const response = await axios.get(CABINET_API_URL);
-      setQueuePoll(response.data);
+      const response = await axios.get(`${API_BASE_URL}/api/cabinets`);
+      if (Array.isArray(response.data)) {
+        setCabinets(response.data);
+        if (response.data.length > 0 && !selectedCabinetId) {
+          setSelectedCabinetId(response.data[0].id);
+        }
+      }
     } catch (error) {
-      console.error('Error fetching queue poll:', error);
-    } finally {
-      setIsLoading(false);
+      setStatusMessage({ type: 'error', text: 'Failed to fetch cabinets.' });
     }
-  }, []);
+  }, [selectedCabinetId]);
+
 
   // --- Initial setup and data fetching ---
 
@@ -283,7 +385,7 @@ export default function ArcadeQueueApp() {
     // Set up periodic health check every 7 minutes 27 seconds
     const healthInterval = setInterval(checkDbHealth, 447000);
     const geolocationInterval = setInterval(checkGeolocation, 60000); // Re-check geolocation every minute
-    const queueInterval = setInterval(fetchQueue, 5000); // Poll every 5 seconds
+    const queueInterval = setInterval(fetchCabinets, 5000); // Poll every 5 seconds
     
     return () => {
 
@@ -291,59 +393,7 @@ export default function ArcadeQueueApp() {
       clearInterval(queueInterval);
       clearInterval(geolocationInterval);
     };
-  }, [fetchQueue, checkGeolocation, checkDbHealth]);
-
-  // Fetch all cabinets
-  const fetchCabinets = async () => {
-    
-    try {
-      const response = await axios.get(CABINET_API_URL);
-      console.debug('fetchCabinets response', { status: response.status, headers: response.headers, data: response.data });
-      const data = response.data;
-
-      // Normalize several common response shapes:
-      // - []
-      // - { data: [] }
-      // - { cabinets: [] }
-      // - single object -> convert to [obj]
-      let parsed = [];
-
-      if (Array.isArray(data)) {
-        parsed = data;
-      } else if (data && Array.isArray(data.data)) {
-        parsed = data.data;
-      } else if (data && Array.isArray(data.cabinets)) {
-        parsed = data.cabinets;
-      } else if (data && typeof data === 'object') {
-        // Sometimes API returns a single cabinet object when there's only one
-        // or returns a keyed object. Try to detect an object with id/name.
-        if (data.id && data.name) {
-          parsed = [data];
-        } else {
-          // last resort: try to extract any array value from the object
-          const firstArray = Object.values(data).find(v => Array.isArray(v));
-          if (firstArray) parsed = firstArray;
-        }
-      }
-
-      if (Array.isArray(parsed)) {
-        console.debug('fetchCabinets parsed array length', parsed.length);
-        setCabinets(parsed);
-        // Auto-select the first cabinet if none selected
-        if (parsed.length > 0 && !selectedCabinetId) {
-          setSelectedCabinetId(parsed[0].id);
-        }
-      } else {
-        console.error('API returned unexpected data for cabinets:', data);
-        console.debug('fetchCabinets - attempted parsed value:', parsed);
-        setCabinets([]);
-      }
-    } catch (error) {
-      // Network/ CORS / server HTML response will be caught here
-      logAxiosDebug(error, 'fetchCabinets');
-      setCabinets([]); // Reset to empty array on error
-    }
-  };
+  }, [fetchCabinets, checkGeolocation, checkDbHealth]);
 
   // --- Cabinet Actions ---
 
@@ -382,24 +432,44 @@ export default function ArcadeQueueApp() {
 
   // --- Queue Actions ---
 
-  // adds a new entry to the queue
+  // adds a new entry to the queue  
   const addToQueue = async () => {
     
-    if (!canEdit || !p1Name.trim() || !selectedCabinetId || isSubmitting) return;
+    if (!canEdit) return;
+    if (!selectedCabinetId) return;
+    if (!p1Name.trim()) return;
     if (newEntryType === 'duo' && !p2Name.trim()) return;
+    
+    if (isSubmittingQueueRef.current) return;
+    isSubmittingQueueRef.current = true;
+
+    const payload = {
+      type: newEntryType,
+      players: newEntryType === 'solo'
+        ? [p1Name.trim()] 
+        : [p1Name.trim(), p2Name.trim()],
+      cabinet_id: selectedCabinetId
+    }
+
+    const tempId = `temp-${Date.now()}`;
+
+    setQueuePoll((prev) => [...prev, {
+      ...payload,
+      id: tempId, // Temporary ID for optimistic UI
+      created_at: new Date().toISOString(),
+      pending: true,
+    }]); // Trigger re-render
+    
     try {
-      await axios.post(QUEUE_API_URL, {
-        type: newEntryType,
-        players: newEntryType === 'solo' ? [p1Name] : [p1Name, p2Name],
-        cabinet_id: selectedCabinetId
-      });
+      await axios.post(QUEUE_API_URL, payload);
       // Refresh cabinets to update the main state, triggering useMemo re-evaluation
       await fetchCabinets(); 
       resetForm();
     } catch (error) {
       console.error('Error adding to queue:', error);
+      setQueuePoll((prev) => prev.filter((q) => q.id !== tempId)); // Remove optimistic entry on error
     } finally {
-      setIsSubmitting(false);
+      isSubmittingQueueRef.current = false;
     }
   };
 
@@ -435,7 +505,7 @@ export default function ArcadeQueueApp() {
       const resp = await axios.patch(`${QUEUE_API_URL}/${id}`, { players: newPlayers });
       console.debug('updateGroup response', { status: resp.status, data: resp.data });
       // Refresh Cabinets to get the updated data from backend
-      await fetchCabinets();
+      await fetchQueue();
     } catch (error) {
       logAxiosDebug(error, 'updateGroup');
 
@@ -535,7 +605,7 @@ export default function ArcadeQueueApp() {
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white pb-20">
       {/* Navbar */}
       <header className="bg-pink-50/50 border-b border-pink-100 sticky top-0 z-30 shadow-xl shadow-amber-50 backdrop-blur-sm">
-        <div className="max-w-3xl mx-auto px-4 h-20 flex items-center justify-between">
+        <div className="grid grid-cols-3 mx-auto px-4 h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="bg-pink-400 p-2 rounded-lg shadow-lg shadow-indigo-500/20">
               <Gamepad2 className="w-6 h-6 text-gray-900" />
@@ -544,6 +614,7 @@ export default function ArcadeQueueApp() {
               ChuMaiCQ
             </h1>
           </div>
+          <div></div>
           <div className="text-xs font-mono text-gray-800">
             SYSTEM: {canEdit ? (
               <span className="flex items-center gap-1">
@@ -560,7 +631,7 @@ export default function ArcadeQueueApp() {
                 {isDbConnected ? 'DB: CONNECTED' : 'DB: DISCONNECTED'}
               </span>
             <span className="flex items-center gap-1">
-              <MapPin size={12} className="text-pink-600" /> {locationStatus}
+              <MapPin size={20} className="text-pink-600" /> {locationStatus}
             </span>            
           </div>
         </div>
@@ -727,7 +798,7 @@ export default function ArcadeQueueApp() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-2">
               <History className="w-6 h-6" />
-              Player(s) ({queue.length})
+              Queue ({queue.length})
             </h2>
             
             {!isAdding && (
@@ -756,14 +827,16 @@ export default function ArcadeQueueApp() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-white">New Entry</h3>
                 <div className="flex bg-pink-50/70 rounded-lg p-1">
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setNewEntryType('solo')}
                     className={`px-3 py-1 rounded text-xs font-bold transition-all ${newEntryType === 'solo' ? 'bg-yellow-200 text-gray-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     disabled={!canEdit}
                   >
                     SOLO
                   </button>
-                  <button 
+                  <button
+                    type="button" 
                     onClick={() => setNewEntryType('duo')}
                     className={`px-3 py-1 rounded text-xs font-bold transition-all ${newEntryType === 'duo' ? 'bg-pink-600 text-gray-900 shadow-sm' : 'text-slate-400 hover:text-slate-700'}`}
                     disabled={!canEdit}
@@ -783,7 +856,12 @@ export default function ArcadeQueueApp() {
                     value={p1Name}
                     onChange={(e) => setP1Name(e.target.value)}
                     className="w-full bg-slate-800/80 border border-amber-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-green-600 text-gray-50 placeholder:text-gray-300"
-                    onKeyDown={(e) => e.key === 'Enter' && addToQueue()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        document.getElementById('joint-queue-btn').focus();
+                      }
+                    }}
                     disabled={!canEdit}
                   />
                 </div>
@@ -797,7 +875,12 @@ export default function ArcadeQueueApp() {
                       value={p2Name}
                       onChange={(e) => setP2Name(e.target.value)}
                       className="w-full bg-slate-800/80 border border-yellow-600 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-pink-600 text-gray-50 placeholder:text-gray-300"
-                      onKeyDown={(e) => e.key === 'Enter' && addToQueue()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          document.getElementById('joint-queue-btn').focus();
+                        }
+                      }}
                       disabled={!canEdit}
                     />
                   </div>
@@ -805,12 +888,19 @@ export default function ArcadeQueueApp() {
               </div>
 
               <div className="flex gap-2 mt-4">
-                <button 
+                <button
+                  id="joint-queue-btn"
+                  type="button"
                   onClick={addToQueue}
-                  disabled={!canEdit}
-                  className="flex-1 bg-white text-slate-900 py-2 rounded-lg text-sm font-bold hover:bg-green-400 transition-colors"
+                  disabled={!canEdit || isSubmittingQueueRef.current}
+                  // className="flex-1 bg-white text-slate-900 py-2 rounded-lg text-sm font-bold hover:bg-green-400 transition-colors"
+                  className={`flex-1 py-2 rounded-lg text-sm text-slate-900 font-bold transition-colors
+                    ${isSubmittingQueueRef.current
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-white hover:bg-green-400'}
+                    `}
                 >
-                  Join Queue
+                  {isSubmittingQueueRef.current ? 'Joining...' : 'Join Queue'}
                 </button>
                 <button 
                   onClick={resetForm}
@@ -912,7 +1002,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
               <input 
-                className="flex-1 bg-slate-800/80 border border-amber-200 rounded-lg px-2 py-1 text-base text-gray-50 focus:outline-none focus:border-green-600"
+                className="w-full bg-slate-800/80 border border-amber-200 rounded-lg px-2 py-1 text-base text-gray-50 focus:outline-none focus:border-green-600"
                 value={editP1}
                 onChange={(e) => setEditP1(e.target.value)}
                 placeholder="Player 1"
@@ -921,7 +1011,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
               />
               {group.type === 'duo' && (
                  <input 
-                 className="flex-1 bg-slate-800/80 border border-yellow-600 rounded-lg px-2 py-1 text-base text-gray-50 focus:outline-none focus:border-pink-600"
+                 className="w-full bg-slate-800/80 border border-yellow-600 rounded-lg px-2 py-1 text-base text-gray-50 focus:outline-none focus:border-pink-600"
                  value={editP2}
                  onChange={(e) => setEditP2(e.target.value)}
                  placeholder="Player 2"
