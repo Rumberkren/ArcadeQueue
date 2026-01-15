@@ -12,8 +12,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Jogja MyMy Queue",
-  description: "On spot queue management app for MyMy",
+  title: "ChuMaiQueue",
+  description: "Chunithm and Maimai Queue Management System for Arcades",
 };
 
 export default function RootLayout({ children }) {
