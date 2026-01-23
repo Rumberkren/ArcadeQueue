@@ -9,6 +9,7 @@ import axios from 'axios';
 import Image from 'next/image';
 
 import chuMaiIcon from '../public/laundryico.png'; // Logo image
+import bemaco from '../public/Artboard_1.png'; // Bemaco logo
 
 import { 
   
@@ -833,9 +834,9 @@ export default function ArcadeQueueApp() {
           className="fixed inset-0 w-full h-full object-cover opacity-100 z-10 pointer-events-none select-none"
       />
 
-      <main className="max-w-3xl mx-auto px-4 pt-34 space-y-8">
-
-        {/* Geolocation Status Bar */}
+      <main className="max-w-3xl mx-auto px-4 md:pt-8 space-y-4">
+        
+        {/* Geolocation Status Bar
         <div className={
           `p-3 rounded-lg flex items-center text-base text-gray-900 italic
           ${canEdit 
@@ -849,14 +850,16 @@ export default function ArcadeQueueApp() {
           <span className="ml-2">{locationStatus}</span>
           {!canEdit && locationStatus.includes('Location verified') && (
             <button
-              onClick={checkGeolocation}
-              className="ml-auto bg-slate-700 text-slate-300 px-3 py-1 rounded-lg text-sm font-bold hover:bg-slate-600 transition-colors"
+            onClick={checkGeolocation}
+            className="ml-auto bg-slate-700 text-slate-300 px-3 py-1 rounded-lg text-sm font-bold hover:bg-slate-600 transition-colors"
             >
               Retry Location Check
             </button>
           )}
-        </div>
+        </div> */}
 
+        <Image src={bemaco} alt="bemaco logo" className="w-full rounded-lg relative pt-6 z-10" />
+        
         {/* Cabinet Selector */}
         <section className="mb-6 relative z-20 backdrop-blur-xs bg-amber-50/50 rounded-2xl p-4">
           <div className="flex items-center gap-4 mb-2">
