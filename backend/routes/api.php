@@ -15,9 +15,11 @@ Route::patch('/cabinets/{id}/reorder', [CabinetController::class, 'reorder']);
 
 // Queue routes
 Route::get('/queue', [QueueController::class, 'index']);
+Route::get('/queue/{cabinetId}/time-to-finish', [QueueController::class, 'timeToFinish']);
 Route::post('/queue', [QueueController::class, 'store']);
 Route::delete('/queue/{id}', [QueueController::class, 'destroy']);
 Route::post('/queue/{id}/cycle', [QueueController::class, 'cycle']);
+Route::post('/queue/{id}/finish', [QueueController::class, 'finish']);
 Route::post('/queue/{id}/move', [QueueController::class, 'move']);
 Route::patch('/queue/{id}', [QueueController::class, 'update']);
 
