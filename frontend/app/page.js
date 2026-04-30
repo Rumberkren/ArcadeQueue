@@ -52,11 +52,26 @@ const LOCATIONS = [
 ]
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL; // Base URL for API
-const API_ACCESS = process.env.MOD_ACCESS ? JSON.parse(process.env.MOD_ACCESS) : []; // Mod access codes
+// Parse NEXT_PUBLIC_MOD_ACCESS safely: prefer JSON, fallback to comma-separated list
+let API_ACCESS = [];
+const _rawModAccess = process.env.NEXT_PUBLIC_MOD_ACCESS || '';
+if (_rawModAccess) {
+  try {
+    const parsed = JSON.parse(_rawModAccess);
+    API_ACCESS = Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    // Fallback: accept comma-separated string, with or without surrounding brackets/quotes
+    API_ACCESS = _rawModAccess
+      .replace(/^\s*\[|\]\s*$/g, '')
+      .split(',')
+      .map(s => s.trim().replace(/^\"|\"$|^\'|\'$/g, ''))
+      .filter(Boolean);
+  }
+}
 const AUTO_FINISH_MINUTES = parseInt(process.env.NEXT_PUBLIC_AUTO_FINISH_MINUTES) || 17; // Auto-finish time limit (client)
 
 if (!API_BASE_URL) throw new Error('NEXT_PUBLIC_API_URL is not defined in environment variables');
-if (API_ACCESS.length === 0) console.warn('No MOD_ACCESS codes defined in environment variables');
+if (API_ACCESS.length === 0) console.warn('No NEXT_PUBLIC_MOD_ACCESS codes defined in environment variables');
 
 // Login Modal Component
 const LoginModal = ({ isOpen, onClose, onLogin }) => {
@@ -67,7 +82,7 @@ const LoginModal = ({ isOpen, onClose, onLogin }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (password || API_ACCESS.includes(password)) {
+    if (API_ACCESS.includes(password)) {
       onLogin();
         onClose();
     } else {
@@ -110,6 +125,26 @@ const LoginModal = ({ isOpen, onClose, onLogin }) => {
     </div>
   );
 
+}
+
+// Generic delete confirmation modal
+const DeleteConfirmModal = ({ isOpen, title = 'Confirm', message = '', onConfirm, onCancel }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md text-slate-100">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">{title}</h3>
+          <button onClick={onCancel}><X className="text-slate-300" /></button>
+        </div>
+        <div className="mb-4 text-sm text-slate-300">{message}</div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="px-4 py-2 rounded bg-slate-700 text-slate-200">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded bg-red-500 text-white">Delete</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Player Item
@@ -213,6 +248,9 @@ export default function ArcadeQueueApp() {
   const [isInsideLocation, setIsInsideLocation] = useState(false); // Whether the user is within allowed geolocation area
   const [showLoginModal, setShowLoginModal] = useState(false); // Controls visibility of login modal
   const pressTimer = useRef(null); // Ref for long-press timer
+  const holdFinishTimerRef = useRef(null);
+  const holdFinishTriggeredRef = useRef(false);
+  const [showDeleteCurrentModal, setShowDeleteCurrentModal] = useState(false);
   
   // Drag State
   const [draggedItemIndex, setDraggedItemIndex] = useState(null); // Index of the currently dragged item
@@ -238,6 +276,7 @@ export default function ArcadeQueueApp() {
   // Geolocation State
   const [canEdit, setCanEdit] = useState(false); // Whether the user can edit based on location, True is whenever user is within the allowed area
   const [locationStatus, setLocationStatus] = useState('Checking location...'); // Status message for geolocation
+  const [isEditMode, setIsEditMode] = useState(false); // Toggle to enable queue reordering (drag-and-drop)
 
   // Database Connection State
   const [isDbConnected, setIsDbConnected] = useState(false); // Whether the system is connected to database
@@ -362,27 +401,6 @@ export default function ArcadeQueueApp() {
       return;
     }
 
-    // R1 - single location
-    // navigator.geolocation.getCurrentPosition(
-      
-    //   (position) => {
-       
-      
-      //   const { latitude: userLat, longitude: userLon } = position.coords;
-      //   const distance = calculateDistance(
-      //     userLat, userLon, TARGET_LAT, TARGET_LON
-      //   );
-
-      //   const isWithinRange = distance <= MAX_DISTANCE_KM;
-      //   setCanEdit(isWithinRange);
-
-      //   if (isWithinRange) {
-      //     setLocationStatus(`You are within the allowed area [ ${distance.toFixed(3)} km ]. | Editing enabled.`);
-      //   } else {
-      //     setLocationStatus(`You are outside the allowed area [ ${distance.toFixed(3)} km ]. Editing disabled.`);
-      //   }
-      // }, 
-
     // R2 - multiple locations
     navigator.geolocation.getCurrentPosition(
       
@@ -460,18 +478,6 @@ export default function ArcadeQueueApp() {
     }
     return null;
   }, [selectedCabinet]);
-
-  // const fetchQueue = useCallback(async () => {
-    
-    // try {
-      //   setIsLoading(true);
-      //   const response = await axios.get(CABINET_API_URL);
-      //   setQueuePoll(response.data);
-      // } catch (error) {
-        //   console.error('Error fetching queue poll:', error);
-        // } finally {
-          //   setIsLoading(false);
-          // }
           
     const fetchQueue = useCallback(async (cabinetId, silent = false) => {
       if (!cabinetId) return;
@@ -496,57 +502,7 @@ export default function ArcadeQueueApp() {
   }, []);
 
   // Fetch all cabinets
-  // R1
-  // const fetchCabinets = async () => {
-    
-    
-    // try {
-    //   const response = await axios.get(CABINET_API_URL);
-    //   console.debug('fetchCabinets response', { status: response.status, headers: response.headers, data: response.data });
-    //   const data = response.data;
-
-    //   // Normalize several common response shapes:
-    //   // - []
-    //   // - { data: [] }
-    //   // - { cabinets: [] }
-    //   // - single object -> convert to [obj]
-    //   let parsed = [];
-
-    //   if (Array.isArray(data)) {
-    //     parsed = data;
-    //   } else if (data && Array.isArray(data.data)) {
-    //     parsed = data.data;
-    //   } else if (data && Array.isArray(data.cabinets)) {
-    //     parsed = data.cabinets;
-    //   } else if (data && typeof data === 'object') {
-    //     // Sometimes API returns a single cabinet object when there's only one
-    //     // or returns a keyed object. Try to detect an object with id/name.
-    //     if (data.id && data.name) {
-    //       parsed = [data];
-    //     } else {
-    //       // last resort: try to extract any array value from the object
-    //       const firstArray = Object.values(data).find(v => Array.isArray(v));
-    //       if (firstArray) parsed = firstArray;
-    //     }
-    //   }
-
-    //   if (Array.isArray(parsed)) {
-    //     console.debug('fetchCabinets parsed array length', parsed.length);
-    //     setCabinets(parsed);
-    //     // Auto-select the first cabinet if none selected
-    //     if (parsed.length > 0 && !selectedCabinetId) {
-    //       setSelectedCabinetId(parsed[0].id);
-    //     }
-    //   } else {
-    //     console.error('API returned unexpected data for cabinets:', data);
-    //     console.debug('fetchCabinets - attempted parsed value:', parsed);
-    //     setCabinets([]);
-    //   }
-    // } catch (error) {
-    //   // Network/ CORS / server HTML response will be caught here
-    //   logAxiosDebug(error, 'fetchCabinets');
-    //   setCabinets([]); // Reset to empty array on error
-    // }
+  
 
     // R2 - simplified
   const fetchCabinets = useCallback(async ()  => {
@@ -626,10 +582,15 @@ export default function ArcadeQueueApp() {
 
           // When timer hits zero, trigger finishGame once and stop the interval until next session
           if (remain <= 0 && !finishTriggeredRef.current) {
-            finishTriggeredRef.current = true;
             try {
-              // call finishGame asynchronously; it will refresh cabinets which will render next queue
-              finishGame();
+              // Only auto-finish if the client has permission (mod) or owns the current session
+              const allowedToFinish = isMod || (currentSession && currentSession.owner_id === clientId);
+              if (allowedToFinish) {
+                // call finishGame asynchronously; it will refresh cabinets which will render next queue
+                finishGame();
+              } else {
+                setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
+              }
             } catch (e) {
               console.debug('finishGame call failed', e);
             }
@@ -650,7 +611,7 @@ export default function ArcadeQueueApp() {
       if (timer) clearInterval(timer);
       finishTriggeredRef.current = false;
     };
-  }, [currentSession]);
+  }, [currentSession, isMod, clientId]);
 
   
 
@@ -792,21 +753,78 @@ export default function ArcadeQueueApp() {
 
   // Finish the current game and cycle the queue
   const finishGame = async () => {
+    // Basic prechecks
     if (!canEdit || !currentSession) return;
+
+    // Prevent duplicate/parallel finish actions
+    if (finishTriggeredRef.current) return;
+    if (isSubmitting) return;
+
+    finishTriggeredRef.current = true;
+    setIsSubmitting(true);
+
     try {
-      if (isMod) {
-        // Mods can cycle/finish any turn
-        await axios.post(`${QUEUE_API_URL}/${currentSession.id}/cycle`, { owner_id: clientId });
-      } else {
-        // Non-mods may finish only their own turn — call the finish endpoint with owner_id
-        await axios.post(`${QUEUE_API_URL}/${currentSession.id}/finish`, { owner_id: clientId });
-      }
+      const endpoint = isMod
+        ? `${QUEUE_API_URL}/${currentSession.id}/cycle`
+        : `${QUEUE_API_URL}/${currentSession.id}/finish`;
+
+      await axios.post(endpoint, { owner_id: clientId });
+
       // Refresh Cabinets to get the new queue state after cycling/finishing
       await fetchCabinets();
+      setStatusMessage({ type: 'success', text: 'Finished current session.' });
     } catch (error) {
-      logAxiosDebug(error, 'finishGame');
+      if (error && error.response && error.response.status === 403) {
+        setStatusMessage({ type: 'error', text: 'Permission denied (403): cannot finish game.' });
+      } else {
+        logAxiosDebug(error, 'finishGame');
+        setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
+      }
+    } finally {
+      setIsSubmitting(false);
+      // keep finishTriggeredRef true briefly to avoid immediate retries, then allow future attempts
+      setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
     }
   };
+
+  // Start hold timer for finish button (3s -> open delete confirmation)
+  const startHoldFinishTimer = () => {
+    if (holdFinishTimerRef.current) clearTimeout(holdFinishTimerRef.current);
+    holdFinishTriggeredRef.current = false;
+    holdFinishTimerRef.current = setTimeout(() => {
+      holdFinishTriggeredRef.current = true;
+      setShowDeleteCurrentModal(true);
+    }, 3000);
+  }
+
+  const cancelHoldFinishTimer = () => {
+    if (holdFinishTimerRef.current) {
+      clearTimeout(holdFinishTimerRef.current);
+      holdFinishTimerRef.current = null;
+    }
+    // don't immediately reset triggered flag here; it will be reset after modal or click logic
+  }
+
+  // Remove the last waiting queue item for the selected cabinet
+  const removeLastFromQueue = async () => {
+    if (!isMod || !canEdit || !selectedCabinetId) return;
+    const waiting = queue || [];
+    if (!waiting || waiting.length === 0) {
+      setStatusMessage({ type: 'info', text: 'No waiting players to remove.' });
+      return;
+    }
+    const last = waiting[waiting.length - 1];
+    try {
+      const ok = typeof window !== 'undefined' ? window.confirm(`Remove last entry "${last.players.join(' & ')}" from queue?`) : true;
+      if (!ok) return;
+      await axios.delete(`${QUEUE_API_URL}/${last.id}`);
+      await fetchCabinets();
+      setStatusMessage({ type: 'success', text: 'Removed last player from queue.' });
+    } catch (error) {
+      logAxiosDebug(error, 'removeLastFromQueue');
+      setStatusMessage({ type: 'error', text: 'Failed to remove last player.' });
+    }
+  }
 
   // --- Drag and Drop Logic (Native HTML5) ---
 
@@ -814,15 +832,17 @@ export default function ArcadeQueueApp() {
   // @pram {object} e - Drag event
   // @param {number} index - Index of the WAITING item array being dragged
   const onDragStart = (e, index) => {
-    
     if (!isMod) return;
+    if (!isEditMode) return; // require explicit edit mode to start dragging
     if (!canEdit) {
-      e.preventDefault();
+      if (e && e.preventDefault) e.preventDefault();
       return;
     }
     // Only allow dragging of items *in* the waiting queue (not the current session)
     setDraggedItemIndex(index);
-    e.dataTransfer.effectAllowed = "move";
+    if (e && e.dataTransfer) {
+      try { e.dataTransfer.effectAllowed = "move"; } catch (err) {}
+    }
   };
 
   // Handle drag over another item to reorder
@@ -830,9 +850,9 @@ export default function ArcadeQueueApp() {
   // @param {object} e - Drag event
   // @param {number} index - Index of the WAITING item array being hovered over
   const onDragOver = (e, index) => {
-    
     if (!isMod) return;
-    e.preventDefault();
+    if (!isEditMode) return; // only allow reordering when edit mode is enabled
+    if (e && e.preventDefault) e.preventDefault();
     if (!canEdit || draggedItemIndex === null || draggedItemIndex === index) return;
     
     // 1. Local state reordering (optimistic update)
@@ -876,6 +896,26 @@ export default function ArcadeQueueApp() {
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white pb-20">
       
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} onLogin={handleLogin} />
+      <DeleteConfirmModal
+        isOpen={showDeleteCurrentModal}
+        title={`Delete Current Playing`}
+        message={`This will remove the currently playing entry from the queue. This action cannot be undone.`}
+        onCancel={() => { setShowDeleteCurrentModal(false); holdFinishTriggeredRef.current = false; }}
+        onConfirm={async () => {
+          try {
+            if (!currentSession) return;
+            await removeFromQueue(currentSession.id, currentSession.owner_id);
+            setShowDeleteCurrentModal(false);
+            holdFinishTriggeredRef.current = false;
+            await fetchCabinets();
+            setStatusMessage({ type: 'success', text: 'Current playing entry deleted.' });
+          } catch (e) {
+            setShowDeleteCurrentModal(false);
+            holdFinishTriggeredRef.current = false;
+            setStatusMessage({ type: 'error', text: 'Failed to delete current entry.' });
+          }
+        }}
+      />
       
       {/* Navbar */}
       <header className="bg-pink-50/50 border-b border-pink-100 sticky top-0 z-30 shadow-xl shadow-amber-50 backdrop-blur-sm">
@@ -917,10 +957,10 @@ export default function ArcadeQueueApp() {
         </div>
       </header>
 
-        <img 
-          src="/image3.jpg" 
-          alt="Arcade Machine" 
-          className="fixed inset-0 w-full h-full object-cover opacity-100 z-10 pointer-events-none select-none"
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 w-full h-full bg-local bg-center bg-cover opacity-100 z-10 pointer-events-none select-none"
+          style={{ backgroundImage: "url('/image3.jpg')" }}
         />
 
       <main className="max-w-3xl mx-auto px-4 md:pt-8 space-y-4">
@@ -978,7 +1018,16 @@ export default function ArcadeQueueApp() {
                 <span>{cabinet.name}</span>
                 {canEdit && isMod && (
                   <button
-                  onClick={e => { e.stopPropagation(); removeCabinet(cabinet.id); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    try {
+                      if (typeof window !== 'undefined') {
+                        const ok = window.confirm(`Delete cabinet "${cabinet.name}"? This cannot be undone.`);
+                        if (!ok) return;
+                      }
+                    } catch (err) {}
+                    removeCabinet(cabinet.id);
+                  }}
                   className="ml-1 text-xs text-red-400 hover:text-red-600"
                   title="Delete Cabinet"
                 >
@@ -1052,13 +1101,25 @@ export default function ArcadeQueueApp() {
 
               <div className="flex flex-col items-center gap-2 z-10">
                 <button 
-                  onClick={finishGame}
-                  disabled={!(canEdit && (isMod || (currentSession && currentSession.owner_id === clientId)))}
+                  onClick={() => {
+                    if (holdFinishTriggeredRef.current) {
+                      // long-press already handled; reset flag and ignore click
+                      holdFinishTriggeredRef.current = false;
+                      return;
+                    }
+                    finishGame();
+                  }}
+                  onPointerDown={() => startHoldFinishTimer()}
+                  onPointerUp={() => cancelHoldFinishTimer()}
+                  onPointerLeave={() => cancelHoldFinishTimer()}
+                  onTouchStart={() => startHoldFinishTimer()}
+                  onTouchEnd={() => cancelHoldFinishTimer()}
+                  disabled={!(canEdit && (isMod || (currentSession && currentSession.owner_id === clientId))) || isSubmitting}
                   className={`z-10 w-full sm:w-auto px-6 py-3 bg-slate-800 hover:bg-slate-600 border border-red-200 hover:border-red-200 text-white 
                   rounded-lg font-medium transition-all active:scale-95 flex items-center justify-center gap-2
-                  ${(!(canEdit && (isMod || (currentSession && currentSession.owner_id === clientId)))) ? 'opacity-50 cursor-not-allowed bg-slate-400 hover:bg-slate-200' : 'cursor-default'}`}
+                  ${(!(canEdit && (isMod || (currentSession && currentSession.owner_id === clientId))) || isSubmitting) ? 'opacity-50 cursor-not-allowed bg-slate-400 hover:bg-slate-200' : 'cursor-default'}`}
                 >
-                  Finish Game
+                  {isSubmitting ? 'Finishing...' : 'Finish Game'}
                   <SendToBack className="w-6 h-6 text-white" />
                 </button>
 
@@ -1094,22 +1155,37 @@ export default function ArcadeQueueApp() {
 
             <div className="col-span-2 justify-self-end">
               {!isAdding && (
-                <button 
-                  onClick={() => {
-                    if (selectedCabinetId) {
-                      setIsAdding(true);
-                    } else {
-                      console.log('Please select a cabinet first.');
-                    }
-                  }}
-                  disabled={!canEdit || !selectedCabinetId}
-                  className={`text-base font-bold px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors 
-                    ${selectedCabinetId ? 
-                      'bg-gray-800 hover:bg-gray-600 text-white' : 
-                      'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
-                >
-                  <Plus size={20} /> Add Player
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      if (selectedCabinetId) {
+                        setIsAdding(true);
+                      } else {
+                        console.log('Please select a cabinet first.');
+                      }
+                    }}
+                    disabled={!canEdit || !selectedCabinetId}
+                    className={`text-base font-bold px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors 
+                      ${selectedCabinetId ? 
+                        'bg-gray-800 hover:bg-gray-600 text-white' : 
+                        'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+                  >
+                    <Plus size={20} /> Add Player
+                  </button>
+
+                  {/* Remove Last player button for mods */}
+                  {isMod && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setIsEditMode(v => !v)}
+                        disabled={!canEdit || !selectedCabinetId}
+                        className={`text-base font-bold px-3 py-1.5 rounded-md flex items-center gap-2 transition-colors ${isEditMode ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'} ${(!canEdit || !selectedCabinetId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title="Toggle Edit Queue (enable drag-and-drop ordering)">
+                        <GripVertical size={16} /> {isEditMode ? 'Editing: ON' : 'Edit Queue'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <div className="col-span-3 justify-self-center pt-4">
@@ -1219,7 +1295,7 @@ export default function ArcadeQueueApp() {
           )}
 
           {/* List */}
-          <div className="space-y-2 relative min-h-[100px]">
+          <div className="space-y-2 relative min-h-[100px] touch-none">
             {queue.length === 0 && !isAdding && (
               <div className="text-center py-10 text-gray-900 italic">
                 Queue is empty. Be the first!
@@ -1239,6 +1315,7 @@ export default function ArcadeQueueApp() {
                 isDragging={draggedItemIndex === index}
                 canEdit={canEdit}
                 isMod={isMod}
+                isEditMode={isEditMode}
                 clientId={clientId}
               />
             ))}
@@ -1250,10 +1327,11 @@ export default function ArcadeQueueApp() {
 }
 
 // --- Sub Component: Queue Item ---
-function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, onDragEnd, isDragging, canEdit, isMod, clientId }) {
+function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, onDragEnd, isDragging, canEdit, isMod, isEditMode, clientId }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editP1, setEditP1] = useState(group.players[0]);
   const [editP2, setEditP2] = useState(group.players[1] || '');
+  const touchLastTargetRef = useRef(null);
 
   const handleSave = () => {
     if (!editP1.trim()) return; 
@@ -1272,12 +1350,45 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
   };
 
   // Don't allow drag if editing
+  const handleTouchStart = (e) => {
+    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    // initiate drag
+    try { if (e && e.stopPropagation) e.stopPropagation(); } catch (err) {}
+    onDragStart && onDragStart(null, index);
+  };
+
+  const handleTouchMove = (e) => {
+    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    const t = e && e.touches && e.touches[0];
+    if (!t) return;
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if (!el) return;
+    const itemEl = el.closest && el.closest('[data-queue-index]');
+    if (!itemEl) return;
+    const targetIndex = parseInt(itemEl.getAttribute('data-queue-index'), 10);
+    if (isNaN(targetIndex)) return;
+    if (touchLastTargetRef.current === targetIndex) return;
+    touchLastTargetRef.current = targetIndex;
+    onDragOver && onDragOver(null, targetIndex);
+  };
+
+  const handleTouchEnd = (e) => {
+    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    touchLastTargetRef.current = null;
+    onDragEnd && onDragEnd();
+  };
+
   return (
     <div 
-      draggable={!isEditing && canEdit}
-      onDragStart={(e) => onDragStart(e, index)}
-      onDragOver={(e) => onDragOver(e, index)}
+      data-queue-index={index}
+      draggable={!isEditing && canEdit && isEditMode}
+      onDragStart={(e) => onDragStart && onDragStart(e, index)}
+      onDragOver={(e) => onDragOver && onDragOver(e, index)}
       onDragEnd={onDragEnd}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       className={`
         group relative flex items-center gap-3 p-3 rounded-xl border transition-all duration-200
         ${isDragging ? 
@@ -1288,7 +1399,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
       `}
     >
       {/* Drag Handle */}
-      {canEdit && isMod && (
+      {canEdit && isMod && isEditMode && (
         <div className={`cursor-grab active:cursor-grabbing text-gray-900 hover:text-sky-500 ${isEditing ? 'invisible' : ''}`}>
           <GripVertical size={20} />
         </div>
