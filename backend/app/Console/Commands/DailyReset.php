@@ -31,32 +31,47 @@ class DailyReset extends Command
         Log::info('DailyReset: starting db:daily-reset');
 
         try {
-            // Disable foreign key checks for truncation
-            DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+            $driver = DB::connection()->getDriverName();
 
-            // Truncate tables (resets AUTO_INCREMENT on MySQL)
-            DB::table('queue_items')->truncate();
-            DB::table('cabinets')->truncate();
-
-            // Re-enable foreign key checks
-            DB::statement('SET FOREIGN_KEY_CHECKS=1;');
-
-            $this->info('Truncated tables: queue_items, cabinets');
-            Log::info('DailyReset: truncated queue_items and cabinets');
-        } catch (\Throwable $e) {
-            // Attempt an alternative safe delete if truncate fails
-            try {
+            if ($driver === 'mysql') {
                 DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+                DB::table('queue_items')->truncate();
+                DB::table('cabinets')->truncate();
+                DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+                $this->info('Truncated tables: queue_items, cabinets (MySQL)');
+                Log::info('DailyReset: truncated queue_items and cabinets (MySQL)');
+            } elseif ($driver === 'sqlite') {
                 DB::table('queue_items')->delete();
                 DB::table('cabinets')->delete();
-                DB::statement('SET FOREIGN_KEY_CHECKS=1;');
-                $this->warn('Truncate failed; performed DELETE. Check logs for details.');
-                Log::warning('DailyReset: truncate failed; performed DELETE fallback');
-            } catch (\Throwable $inner) {
-                $this->error('Daily reset failed: ' . $inner->getMessage());
-                Log::error('DailyReset: failed - ' . $inner->getMessage());
-                return Command::FAILURE;
+                DB::statement("DELETE FROM sqlite_sequence WHERE name='queue_items';");
+                DB::statement("DELETE FROM sqlite_sequence WHERE name='cabinets';");
+                $this->info('Deleted rows and reset sqlite sequences: queue_items, cabinets');
+                Log::info('DailyReset: sqlite delete + sequence reset');
+            } elseif ($driver === 'pgsql' || $driver === 'postgres') {
+                DB::table('queue_items')->delete();
+                DB::table('cabinets')->delete();
+                DB::statement("SELECT setval(pg_get_serial_sequence('queue_items','id'), 1, false);");
+                DB::statement("SELECT setval(pg_get_serial_sequence('cabinets','id'), 1, false);");
+                $this->info('Deleted rows and reset Postgres sequences: queue_items, cabinets');
+                Log::info('DailyReset: postgres delete + sequence reset');
+            } else {
+                // Generic attempt: try truncate first, fallback to delete and best-effort reset
+                try {
+                    DB::table('queue_items')->truncate();
+                    DB::table('cabinets')->truncate();
+                    $this->info('Truncated tables: queue_items, cabinets');
+                    Log::info('DailyReset: truncated queue_items and cabinets (generic)');
+                } catch (\Throwable $inner) {
+                    DB::table('queue_items')->delete();
+                    DB::table('cabinets')->delete();
+                    $this->warn('Truncate not supported; performed DELETE fallback');
+                    Log::warning('DailyReset: truncate unsupported; performed DELETE fallback');
+                }
             }
+        } catch (\Throwable $e) {
+            $this->error('Daily reset failed: ' . $e->getMessage());
+            Log::error('DailyReset: failed - ' . $e->getMessage());
+            return Command::FAILURE;
         }
 
         $this->info('Daily DB reset completed successfully.');

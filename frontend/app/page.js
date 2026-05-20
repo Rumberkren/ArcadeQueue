@@ -276,7 +276,6 @@ export default function ArcadeQueueApp() {
   // Geolocation State
   const [canEdit, setCanEdit] = useState(false); // Whether the user can edit based on location, True is whenever user is within the allowed area
   const [locationStatus, setLocationStatus] = useState('Checking location...'); // Status message for geolocation
-  const [isEditMode, setIsEditMode] = useState(false); // Toggle to enable queue reordering (drag-and-drop)
 
   // Database Connection State
   const [isDbConnected, setIsDbConnected] = useState(false); // Whether the system is connected to database
@@ -832,8 +831,8 @@ export default function ArcadeQueueApp() {
   // @pram {object} e - Drag event
   // @param {number} index - Index of the WAITING item array being dragged
   const onDragStart = (e, index) => {
+    
     if (!isMod) return;
-    if (!isEditMode) return; // require explicit edit mode to start dragging
     if (!canEdit) {
       if (e && e.preventDefault) e.preventDefault();
       return;
@@ -850,8 +849,8 @@ export default function ArcadeQueueApp() {
   // @param {object} e - Drag event
   // @param {number} index - Index of the WAITING item array being hovered over
   const onDragOver = (e, index) => {
+    
     if (!isMod) return;
-    if (!isEditMode) return; // only allow reordering when edit mode is enabled
     if (e && e.preventDefault) e.preventDefault();
     if (!canEdit || draggedItemIndex === null || draggedItemIndex === index) return;
     
@@ -894,6 +893,12 @@ export default function ArcadeQueueApp() {
   // --- Cabinet Selector UI ---
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white pb-20">
+
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 w-full h-full bg-local bg-center bg-cover opacity-100 z-10 pointer-events-none select-none"
+        style={{ backgroundImage: "url('/image3.jpg')" }}
+      />
       
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} onLogin={handleLogin} />
       <DeleteConfirmModal
@@ -956,12 +961,6 @@ export default function ArcadeQueueApp() {
           </div>
         </div>
       </header>
-
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 w-full h-full bg-local bg-center bg-cover opacity-100 z-10 pointer-events-none select-none"
-          style={{ backgroundImage: "url('/image3.jpg')" }}
-        />
 
       <main className="max-w-3xl mx-auto px-4 md:pt-8 space-y-4">
         
@@ -1175,15 +1174,14 @@ export default function ArcadeQueueApp() {
 
                   {/* Remove Last player button for mods */}
                   {isMod && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setIsEditMode(v => !v)}
-                        disabled={!canEdit || !selectedCabinetId}
-                        className={`text-base font-bold px-3 py-1.5 rounded-md flex items-center gap-2 transition-colors ${isEditMode ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'} ${(!canEdit || !selectedCabinetId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        title="Toggle Edit Queue (enable drag-and-drop ordering)">
-                        <GripVertical size={16} /> {isEditMode ? 'Editing: ON' : 'Edit Queue'}
-                      </button>
-                    </div>
+                    <button
+                      onClick={removeLastFromQueue}
+                      disabled={!canEdit || !selectedCabinetId || (queue && queue.length === 0)}
+                      className={`text-base font-bold px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors bg-red-600 hover:bg-red-700 text-white ${(!canEdit || !selectedCabinetId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title="Remove last player in queue"
+                    >
+                      <Trash2 size={16} /> Remove Last
+                    </button>
                   )}
                 </div>
               )}
@@ -1315,7 +1313,6 @@ export default function ArcadeQueueApp() {
                 isDragging={draggedItemIndex === index}
                 canEdit={canEdit}
                 isMod={isMod}
-                isEditMode={isEditMode}
                 clientId={clientId}
               />
             ))}
@@ -1327,7 +1324,7 @@ export default function ArcadeQueueApp() {
 }
 
 // --- Sub Component: Queue Item ---
-function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, onDragEnd, isDragging, canEdit, isMod, isEditMode, clientId }) {
+function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, onDragEnd, isDragging, canEdit, isMod, clientId }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editP1, setEditP1] = useState(group.players[0]);
   const [editP2, setEditP2] = useState(group.players[1] || '');
@@ -1351,14 +1348,14 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
 
   // Don't allow drag if editing
   const handleTouchStart = (e) => {
-    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    if (!canEdit || !isMod || isEditing) return;
     // initiate drag
     try { if (e && e.stopPropagation) e.stopPropagation(); } catch (err) {}
     onDragStart && onDragStart(null, index);
   };
 
   const handleTouchMove = (e) => {
-    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    if (!canEdit || !isMod || isEditing) return;
     const t = e && e.touches && e.touches[0];
     if (!t) return;
     const el = document.elementFromPoint(t.clientX, t.clientY);
@@ -1373,7 +1370,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
   };
 
   const handleTouchEnd = (e) => {
-    if (!canEdit || !isMod || !isEditMode || isEditing) return;
+    if (!canEdit || !isMod || isEditing) return;
     touchLastTargetRef.current = null;
     onDragEnd && onDragEnd();
   };
@@ -1381,7 +1378,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
   return (
     <div 
       data-queue-index={index}
-      draggable={!isEditing && canEdit && isEditMode}
+      draggable={!isEditing && canEdit}
       onDragStart={(e) => onDragStart && onDragStart(e, index)}
       onDragOver={(e) => onDragOver && onDragOver(e, index)}
       onDragEnd={onDragEnd}
@@ -1399,7 +1396,7 @@ function QueueItem({ group, index, onRemove, onUpdate, onDragStart, onDragOver, 
       `}
     >
       {/* Drag Handle */}
-      {canEdit && isMod && isEditMode && (
+      {canEdit && isMod && (
         <div className={`cursor-grab active:cursor-grabbing text-gray-900 hover:text-sky-500 ${isEditing ? 'invisible' : ''}`}>
           <GripVertical size={20} />
         </div>
