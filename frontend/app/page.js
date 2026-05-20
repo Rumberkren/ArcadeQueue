@@ -486,7 +486,11 @@ export default function ArcadeQueueApp() {
 
         const validatedQueue = (queue_items || []).map(item => ({
           id: item.id,
-          players: item.players ? JSON.parse(item.players) : [],
+          players: Array.isArray(item.players)
+            ? item.players
+            : item.players
+            ? JSON.parse(item.players)
+            : [],
           type: item.type,
           isNext: !!item.is_next,
           order: item.order

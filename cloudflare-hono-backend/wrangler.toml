@@ -1,0 +1,9 @@
+name = "arcadequeue-cloudflare-api"
+account_id = ""
+main = "worker.js"
+compatibility_date = "2026-05-20"
+[vars]
+AUTO_FINISH_MINUTES = "17"
+[[d1_databases]]
+binding = "DB"
+database_name = "arcadeq"
