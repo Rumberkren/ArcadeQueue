@@ -11,7 +11,7 @@ This folder contains a Cloudflare Workers backend built with Hono and D1.
 
 2. Configure Cloudflare D1
    - Add a D1 database named `arcadequeue`.
-   - Ensure the `DB` binding in `wrangler.toml` points to that database.
+   - Ensure the `arcadeq` binding in `wrangler.toml` points to that database.
 
 3. Deploy
    ```bash

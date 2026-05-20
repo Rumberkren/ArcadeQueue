@@ -138,7 +138,7 @@ const getCabinetQueuePayload = async (db, cabinetId) => {
 
 app.get('/api/health', async (c) => {
   try {
-    await c.env.DB.prepare('SELECT 1').first();
+    await c.env.arcadeq.prepare('SELECT 1').first();
     return c.json({ status: 'ok' });
   } catch (error) {
     return c.json({ status: 'error', message: error?.message || 'DB error' }, { status: 500 });
@@ -146,8 +146,8 @@ app.get('/api/health', async (c) => {
 });
 
 app.get('/api/cabinets', async (c) => {
-  await expireOldItems(c.env.DB, getAutoFinishMinutes(c));
-  const cabinets = await loadCabinetsWithItems(c.env.DB);
+  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+  const cabinets = await loadCabinetsWithItems(c.env.arcadeq);
   return c.json(cabinets);
 });
 
@@ -159,12 +159,12 @@ app.post('/api/cabinets', async (c) => {
     return c.json({ message: 'The name field is required.' }, { status: 422 });
   }
 
-  await c.env.DB
+  await c.env.arcadeq
     .prepare('INSERT OR IGNORE INTO cabinets (name, created_at, updated_at) VALUES (?, datetime("now"), datetime("now"))')
     .bind(name)
     .run();
 
-  const cabinet = await c.env.DB.prepare('SELECT * FROM cabinets WHERE name = ?').bind(name).first();
+  const cabinet = await c.env.arcadeq.prepare('SELECT * FROM cabinets WHERE name = ?').bind(name).first();
   return c.json(cabinet, { status: 201 });
 });
 
@@ -177,19 +177,19 @@ app.put('/api/cabinets/:id', async (c) => {
     return c.json({ message: 'The name field is required.' }, { status: 422 });
   }
 
-  const cabinet = await getCabinet(c.env.DB, id);
+  const cabinet = await getCabinet(c.env.arcadeq, id);
   if (!cabinet) {
     return c.json({ message: 'Cabinet not found' }, { status: 404 });
   }
 
-  await c.env.DB.prepare('UPDATE cabinets SET name = ?, updated_at = datetime("now") WHERE id = ?').bind(name, id).run();
-  const updated = await getCabinet(c.env.DB, id);
+  await c.env.arcadeq.prepare('UPDATE cabinets SET name = ?, updated_at = datetime("now") WHERE id = ?').bind(name, id).run();
+  const updated = await getCabinet(c.env.arcadeq, id);
   return c.json(updated);
 });
 
 app.delete('/api/cabinets/:id', async (c) => {
   const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM cabinets WHERE id = ?').bind(id).run();
+  await c.env.arcadeq.prepare('DELETE FROM cabinets WHERE id = ?').bind(id).run();
   return c.json({ message: 'Deleted' });
 });
 
@@ -203,7 +203,7 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
   }
 
   const placeholder = newOrder.map(() => '?').join(',');
-  const existingRows = await c.env.DB
+  const existingRows = await c.env.arcadeq
     .prepare(`SELECT id FROM queue_items WHERE id IN (${placeholder}) AND cabinet_id = ?`)
     .bind(...newOrder, id)
     .all();
@@ -212,7 +212,7 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
     return c.json({ message: 'new_order contains invalid queue item ids' }, { status: 422 });
   }
 
-  const positionsResult = await c.env.DB
+  const positionsResult = await c.env.arcadeq
     .prepare(`SELECT id, position FROM queue_items WHERE id IN (${placeholder}) ORDER BY position ASC`)
     .bind(...newOrder)
     .all();
@@ -220,7 +220,7 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
   const positions = (positionsResult.results || []).map((row) => row.position).sort((a, b) => a - b);
 
   for (let index = 0; index < newOrder.length; index += 1) {
-    await c.env.DB
+    await c.env.arcadeq
       .prepare('UPDATE queue_items SET position = ? WHERE id = ?')
       .bind(positions[index], newOrder[index])
       .run();
@@ -230,17 +230,17 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
 });
 
 app.get('/api/queue', async (c) => {
-  await expireOldItems(c.env.DB, getAutoFinishMinutes(c));
+  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
 
-  const queueResult = await c.env.DB.prepare('SELECT * FROM queue_items ORDER BY position ASC').all();
+  const queueResult = await c.env.arcadeq.prepare('SELECT * FROM queue_items ORDER BY position ASC').all();
   const items = (queueResult.results || []).map(formatQueueItem);
   return c.json(items);
 });
 
 app.get('/api/queue/:cabinetId/time-to-finish', async (c) => {
   const cabinetId = c.req.param('cabinetId');
-  await expireOldItems(c.env.DB, getAutoFinishMinutes(c));
-  const row = await c.env.DB
+  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+  const row = await c.env.arcadeq
     .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1')
     .bind(cabinetId)
     .first();
@@ -259,13 +259,13 @@ app.get('/api/queue/:cabinetId/time-to-finish', async (c) => {
 
 app.get('/api/queue/:cabinetId', async (c) => {
   const cabinetId = c.req.param('cabinetId');
-  await expireOldItems(c.env.DB, getAutoFinishMinutes(c));
-  const cabinet = await getCabinet(c.env.DB, cabinetId);
+  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+  const cabinet = await getCabinet(c.env.arcadeq, cabinetId);
   if (!cabinet) {
     return c.json({ message: 'Cabinet not found' }, { status: 404 });
   }
 
-  return c.json(await getCabinetQueuePayload(c.env.DB, cabinetId));
+  return c.json(await getCabinetQueuePayload(c.env.arcadeq, cabinetId));
 });
 
 app.post('/api/queue', async (c) => {
@@ -280,7 +280,7 @@ app.post('/api/queue', async (c) => {
     return c.json({ message: 'type must be solo or duo' }, { status: 422 });
   }
 
-  const cabinet = await getCabinet(c.env.DB, cabinetId);
+  const cabinet = await getCabinet(c.env.arcadeq, cabinetId);
   if (!cabinet) {
     return c.json({ message: 'cabinet_id must point to an existing cabinet' }, { status: 422 });
   }
@@ -295,7 +295,7 @@ app.post('/api/queue', async (c) => {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
-  const existing = await c.env.DB
+  const existing = await c.env.arcadeq
     .prepare('SELECT * FROM queue_items WHERE request_hash = ?')
     .bind(hash)
     .first();
@@ -304,20 +304,20 @@ app.post('/api/queue', async (c) => {
     return c.json(formatQueueItem(existing), { status: 200 });
   }
 
-  const maxResult = await c.env.DB
+  const maxResult = await c.env.arcadeq
     .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
     .bind(cabinetId)
     .first();
   const position = (maxResult?.max_position ?? 0) + 1;
 
-  await c.env.DB
+  await c.env.arcadeq
     .prepare(
       'INSERT INTO queue_items (cabinet_id, type, players, position, request_hash, owner_id, is_playing, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, datetime("now"), datetime("now"))'
     )
     .bind(cabinetId, type, JSON.stringify(players), position, hash, ownerId)
     .run();
 
-  const inserted = await c.env.DB
+  const inserted = await c.env.arcadeq
     .prepare('SELECT * FROM queue_items WHERE request_hash = ?')
     .bind(hash)
     .first();
@@ -327,24 +327,24 @@ app.post('/api/queue', async (c) => {
 
 app.delete('/api/queue/:id', async (c) => {
   const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM queue_items WHERE id = ?').bind(id).run();
+  await c.env.arcadeq.prepare('DELETE FROM queue_items WHERE id = ?').bind(id).run();
   return c.json({ message: 'Deleted' });
 });
 
 app.post('/api/queue/:id/cycle', async (c) => {
   const id = c.req.param('id');
-  const item = await getQueueItem(c.env.DB, id);
+  const item = await getQueueItem(c.env.arcadeq, id);
   if (!item) {
     return c.json({ message: 'Queue item not found' }, { status: 404 });
   }
 
-  const maxResult = await c.env.DB
+  const maxResult = await c.env.arcadeq
     .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
     .bind(item.cabinet_id)
     .first();
   const maxPosition = (maxResult?.max_position ?? 0) + 1;
 
-  await c.env.DB.batch([
+  await c.env.arcadeq.batch([
     { sql: 'BEGIN' },
     {
       sql: 'UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?',
@@ -353,13 +353,13 @@ app.post('/api/queue/:id/cycle', async (c) => {
     { sql: 'COMMIT' },
   ]);
 
-  const next = await c.env.DB
+  const next = await c.env.arcadeq
     .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1')
     .bind(item.cabinet_id, id)
     .first();
 
   if (next && !next.started_at) {
-    await c.env.DB
+    await c.env.arcadeq
       .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
       .bind(next.id)
       .run();
@@ -373,7 +373,7 @@ app.post('/api/queue/:id/finish', async (c) => {
   const body = await c.req.json();
   const ownerId = body?.owner_id ? String(body.owner_id) : null;
 
-  const item = await getQueueItem(c.env.DB, id);
+  const item = await getQueueItem(c.env.arcadeq, id);
   if (!item) {
     return c.json({ message: 'Queue item not found' }, { status: 404 });
   }
@@ -382,7 +382,7 @@ app.post('/api/queue/:id/finish', async (c) => {
     return c.json({ message: 'You do not have permission to finish this turn' }, { status: 403 });
   }
 
-  await finishQueueItem(c.env.DB, item);
+  await finishQueueItem(c.env.arcadeq, item);
   return c.json({ message: 'Turn finished' });
 });
 
@@ -395,23 +395,23 @@ app.post('/api/queue/:id/move', async (c) => {
     return c.json({ message: 'target_cabinet_id is required' }, { status: 422 });
   }
 
-  const targetCabinet = await getCabinet(c.env.DB, targetCabinetId);
+  const targetCabinet = await getCabinet(c.env.arcadeq, targetCabinetId);
   if (!targetCabinet) {
     return c.json({ message: 'target_cabinet_id must point to an existing cabinet' }, { status: 422 });
   }
 
-  const item = await getQueueItem(c.env.DB, id);
+  const item = await getQueueItem(c.env.arcadeq, id);
   if (!item) {
     return c.json({ message: 'Queue item not found' }, { status: 404 });
   }
 
-  const maxResult = await c.env.DB
+  const maxResult = await c.env.arcadeq
     .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
     .bind(targetCabinetId)
     .first();
 
   const newPosition = (maxResult?.max_position ?? 0) + 1;
-  await c.env.DB
+  await c.env.arcadeq
     .prepare('UPDATE queue_items SET cabinet_id = ?, position = ?, updated_at = datetime("now") WHERE id = ?')
     .bind(targetCabinetId, newPosition, id)
     .run();
@@ -428,7 +428,7 @@ app.patch('/api/queue/:id', async (c) => {
   }
 
   const players = normalizePlayers(body.players);
-  const item = await getQueueItem(c.env.DB, id);
+  const item = await getQueueItem(c.env.arcadeq, id);
   if (!item) {
     return c.json({ message: 'Queue item not found' }, { status: 404 });
   }
@@ -447,7 +447,7 @@ app.patch('/api/queue/:id', async (c) => {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
-  const collision = await c.env.DB
+  const collision = await c.env.arcadeq
     .prepare('SELECT id FROM queue_items WHERE request_hash = ? AND id != ?')
     .bind(newHash, id)
     .first();
@@ -456,12 +456,12 @@ app.patch('/api/queue/:id', async (c) => {
     return c.json({ message: 'Duplicate queue entry detected' }, { status: 422 });
   }
 
-  await c.env.DB
+  await c.env.arcadeq
     .prepare('UPDATE queue_items SET players = ?, request_hash = ?, updated_at = datetime("now") WHERE id = ?')
     .bind(JSON.stringify(players), newHash, id)
     .run();
 
-  const updated = await getQueueItem(c.env.DB, id);
+  const updated = await getQueueItem(c.env.arcadeq, id);
   return c.json(formatQueueItem(updated));
 });
 
