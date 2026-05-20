@@ -4,7 +4,6 @@
   "main": "server.js",
   "scripts": {
     "build": "next build",
-    "export": "next export",
     "dev": "next dev",
     "start": "next start",
     "lint": "next lint",
