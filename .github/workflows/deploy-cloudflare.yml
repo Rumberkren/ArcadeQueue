@@ -24,7 +24,7 @@ jobs:
 
       - name: Install worker dependencies
         working-directory: cloudflare-hono-backend
-        run: npm ci
+        run: npm install
 
       - name: Deploy Cloudflare Worker backend
         working-directory: cloudflare-hono-backend
