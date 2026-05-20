@@ -53,31 +53,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
-      - name: Debug Cloudflare Pages project lookup
-        run: |
-          echo "Checking Cloudflare Pages project lookup"
-          echo "Account ID: ${CLOUDFLARE_ACCOUNT_ID}"
-          echo "Project name: ${CLOUDFLARE_PAGES_PROJECT_NAME}"
-          curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects?name=${CLOUDFLARE_PAGES_PROJECT_NAME}" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            | python -c 'import json,sys; print(json.dumps(json.load(sys.stdin), indent=2))'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
-
-      - name: List all Cloudflare Pages projects in account
-        run: |
-          echo "Listing all Cloudflare Pages projects for account ${CLOUDFLARE_ACCOUNT_ID}"
-          curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects?per_page=100" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            | python -c 'import json,sys; data=json.load(sys.stdin); print(json.dumps(data, indent=2)); print("\nProject names:"); print("\n".join([project.get("name","<unknown>") for project in data.get("result",[])]))'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Deploy frontend to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
