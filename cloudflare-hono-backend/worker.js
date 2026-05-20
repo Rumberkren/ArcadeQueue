@@ -465,4 +465,5 @@ app.patch('/api/queue/:id', async (c) => {
   return c.json(formatQueueItem(updated));
 });
 
-app.fire();
+// Export the Hono app as the default export so Wrangler publishes an ESM worker.
+export default app;
