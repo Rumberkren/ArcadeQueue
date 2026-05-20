@@ -51,7 +51,7 @@ const LOCATIONS = [
   },
 ]
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL; // Base URL for API
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''; // Base URL for API
 // Parse NEXT_PUBLIC_MOD_ACCESS safely: prefer JSON, fallback to comma-separated list
 let API_ACCESS = [];
 const _rawModAccess = process.env.NEXT_PUBLIC_MOD_ACCESS || '';
@@ -70,7 +70,9 @@ if (_rawModAccess) {
 }
 const AUTO_FINISH_MINUTES = parseInt(process.env.NEXT_PUBLIC_AUTO_FINISH_MINUTES) || 17; // Auto-finish time limit (client)
 
-if (!API_BASE_URL) throw new Error('NEXT_PUBLIC_API_URL is not defined in environment variables');
+if (!API_BASE_URL) {
+  console.warn('NEXT_PUBLIC_API_URL is not defined in environment variables. API requests will fail until it is provided.');
+}
 if (API_ACCESS.length === 0) console.warn('No NEXT_PUBLIC_MOD_ACCESS codes defined in environment variables');
 
 // Login Modal Component
