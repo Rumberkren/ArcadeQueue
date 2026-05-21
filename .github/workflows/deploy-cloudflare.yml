@@ -26,11 +26,13 @@ jobs:
           if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "CLOUDFLARE_ACCOUNT_ID is not set"; exit 1; fi
           if [ -z "$CLOUDFLARE_PAGES_PROJECT_NAME" ]; then echo "CLOUDFLARE_PAGES_PROJECT_NAME is not set"; exit 1; fi
           if [ -z "$NEXT_PUBLIC_API_URL" ]; then echo "NEXT_PUBLIC_API_URL is not set"; exit 1; fi
+          if [ -z "$NEXT_PUBLIC_MOD_ACCESS" ]; then echo "NEXT_PUBLIC_MOD_ACCESS is not set"; exit 1; fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_MOD_ACCESS: ${{ secrets.NEXT_PUBLIC_MOD_ACCESS }}
 
       - name: Install frontend dependencies
         working-directory: frontend
