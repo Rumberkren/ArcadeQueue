@@ -465,45 +465,43 @@ export default function ArcadeQueueApp() {
   }, [cabinets, selectedCabinetId]);
 
   // Get the queue items for the selected cabinet
+  // Fix derived states to look at the polled datasets:
   const queue = useMemo(() => {
-    
+    if (queuePoll && queuePoll.length > 0) {
+      return currentSessionPoll ? queuePoll.filter(item => item.id !== currentSessionPoll.id) : queuePoll.slice(1);
+    }
     return selectedCabinet?.queue_items?.slice(1) || [];
-  }, [selectedCabinet]);
+  }, [selectedCabinet, queuePoll, currentSessionPoll]);
 
   // Get the current session (the first item in the queue_items)
   const currentSession = useMemo(() => {
-    
-    const items = selectedCabinet?.queue_items;
-    if (items && items.length > 0) {
-      return items[0];
-    }
-    return null;
-  }, [selectedCabinet]);
+    return currentSessionPoll || (selectedCabinet?.queue_items?.length > 0 ? selectedCabinet.queue_items[0] : null);
+  }, [selectedCabinet, currentSessionPoll]);
           
-    const fetchQueue = useCallback(async (cabinetId, silent = false) => {
-      if (!cabinetId) return;
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/queue/${cabinetId}`);
-        const { queue_items, current_session } = response.data;
+  const fetchQueue = useCallback(async (cabinetId, silent = false) => {
+    if (!cabinetId) return;
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/queue/${cabinetId}`);
+      const { queue_items, current_session } = response.data;
 
-        const validatedQueue = (queue_items || []).map(item => ({
-          id: item.id,
-          players: Array.isArray(item.players)
-            ? item.players
-            : item.players
-            ? JSON.parse(item.players)
-            : [],
-          type: item.type,
-          isNext: !!item.is_next,
-          order: item.order
-        }));
+      const validatedQueue = (queue_items || []).map(item => ({
+        id: item.id,
+        players: Array.isArray(item.players)
+          ? item.players
+          : item.players
+          ? JSON.parse(item.players)
+          : [],
+        type: item.type,
+        isNext: !!item.is_next,
+        order: item.order
+      }));
 
-        setQueuePoll(validatedQueue);
-        setCurrentSessionPoll(current_session);
-        if(!silent) setStatusMessage({ type: 'success', text: 'Queue updated.' });
-      } catch (error) {
-        if(!silent) setStatusMessage({ type: 'error', text: 'Failed to fetch queue.' });
-      }
+      setQueuePoll(validatedQueue);
+      setCurrentSessionPoll(current_session);
+      if(!silent) setStatusMessage({ type: 'success', text: 'Queue updated.' });
+    } catch (error) {
+      if(!silent) setStatusMessage({ type: 'error', text: 'Failed to fetch queue.' });
+    }
   }, []);
 
   // Fetch all cabinets
@@ -530,24 +528,26 @@ export default function ArcadeQueueApp() {
 
   // Runs once on component mount and check location
   useEffect(() => {
-    
     fetchCabinets();
-    fetchQueue();
     checkGeolocation();
-    checkDbHealth(); // check DB health on load
+    checkDbHealth();
     
-    // Set up periodic health check every 7 minutes 27 seconds
     const healthInterval = setInterval(checkDbHealth, 447000);
-    const geolocationInterval = setInterval(checkGeolocation, 60000); // Re-check geolocation every minute
-    const queueInterval = setInterval(fetchCabinets, 5000); // Poll every 5 seconds
+    const geolocationInterval = setInterval(checkGeolocation, 60000);
+    
+    const queueInterval = setInterval(() => {
+      fetchCabinets();
+      if (selectedCabinetId) {
+        fetchQueue(selectedCabinetId, true); // true for silent mode
+      }
+    }, 5000);
     
     return () => {
-
       clearInterval(healthInterval);
       clearInterval(queueInterval);
       clearInterval(geolocationInterval);
     };
-  }, [fetchCabinets, checkGeolocation, checkDbHealth]);
+  }, [fetchCabinets, fetchQueue, selectedCabinetId, checkGeolocation, checkDbHealth]);
 
   // Fetch server-side computed remaining seconds when selected cabinet changes
   const fetchServerRemaining = useCallback(async (cabinetId) => {

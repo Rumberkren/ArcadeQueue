@@ -170,11 +170,11 @@ const getCabinetQueuePayload = async (db, cabinetId) => {
     .all();
 
   const items = (itemsResult.results || []).map(formatQueueItem);
-  const currentSession = items.length > 0 ? items[0] : null;
+  const currentSession = items.find(item => item.is_playing) || (items.length > 0 ? items[0] : null);
 
   return {
     current_session: currentSession,
-    queue_items: items.slice(1),
+    queue_items: items,
   };
 };
 
