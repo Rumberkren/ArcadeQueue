@@ -408,7 +408,7 @@ app.post('/api/queue/:id/cycle', async (c) => {
 
     console.log(`[CYCLE-${requestId}] Next item found: ${next ? `id ${next.id} at position ${next.position}` : 'none'}`);
 
-    if (next && !next.started_at) {
+    if (next) {
       console.log(`[CYCLE-${requestId}] Marking item ${next.id} as playing`);
       await c.env.arcadeq
         .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
