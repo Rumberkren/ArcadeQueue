@@ -382,7 +382,7 @@ app.post('/api/queue/:id/cycle', async (c) => {
     .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
     .bind(item.cabinet_id)
     .first();
-  const maxPosition = (maxResult?.max_position ?? 0) + 1;
+  const maxPosition = maxResult?.max_position ?? 0;
 
   await c.env.arcadeq.batch([
     { sql: 'BEGIN' },
