@@ -758,15 +758,15 @@ export default function ArcadeQueueApp() {
 
   // Finish the current game and cycle the queue
   const finishGame = async () => {
-    // Basic prechecks
     if (!canEdit || !currentSession) return;
-
-    // Prevent duplicate/parallel finish actions
-    if (finishTriggeredRef.current) return;
-    if (isSubmitting) return;
+    if (finishTriggeredRef.current || isSubmitting) return;
 
     finishTriggeredRef.current = true;
     setIsSubmitting(true);
+
+    // Optimistically clear the session variables to stop timers and UI updates immediately
+    setCurrentSessionPoll(null); 
+    setRemainingSeconds(null);
 
     try {
       const endpoint = isMod
@@ -774,20 +774,18 @@ export default function ArcadeQueueApp() {
         : `${QUEUE_API_URL}/${currentSession.id}/finish`;
 
       await axios.post(endpoint, { owner_id: clientId });
-
-      // Refresh Cabinets to get the new queue state after cycling/finishing
+      
+      // Refresh datasets synchronously
       await fetchCabinets();
+      if (selectedCabinetId) {
+        await fetchQueue(selectedCabinetId, true);
+      }
+      
       setStatusMessage({ type: 'success', text: 'Finished current session.' });
     } catch (error) {
-      if (error && error.response && error.response.status === 403) {
-        setStatusMessage({ type: 'error', text: 'Permission denied (403): cannot finish game.' });
-      } else {
-        logAxiosDebug(error, 'finishGame');
-        setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
-      }
-    } finally {
+      setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
+    } {
       setIsSubmitting(false);
-      // keep finishTriggeredRef true briefly to avoid immediate retries, then allow future attempts
       setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
     }
   };

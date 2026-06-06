@@ -375,7 +375,6 @@ app.delete('/api/queue/:id', async (c) => {
 
 app.post('/api/queue/:id/cycle', async (c) => {
   const requestId = Math.random().toString(36).substring(7);
-  console.log(`[CYCLE-${requestId}] Starting cycle for item ${c.req.param('id')}`);
   
   try {
     const id = c.req.param('id');
@@ -383,11 +382,8 @@ app.post('/api/queue/:id/cycle', async (c) => {
     const item = await getQueueItem(db, id);
     
     if (!item) {
-      console.log(`[CYCLE-${requestId}] Item not found: ${id}`);
       return c.json({ message: 'Queue item not found' }, { status: 404 });
     }
-
-    console.log(`[CYCLE-${requestId}] Found item at position ${item.position}, cabinet ${item.cabinet_id}`);
 
     // 1. Get the current maximum position to safely place this item at the end
     const maxResult = await db
@@ -408,8 +404,6 @@ app.post('/api/queue/:id/cycle', async (c) => {
         .bind(item.cabinet_id, item.position, id)
     ]);
 
-    console.log(`[CYCLE-${requestId}] Item moved to temporary back position: ${targetBackPosition}`);
-
     // 3. Find who is now the first item in line
     const next = await db
       .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1')
@@ -417,7 +411,6 @@ app.post('/api/queue/:id/cycle', async (c) => {
       .first();
 
     if (next) {
-      console.log(`[CYCLE-${requestId}] Marking item ${next.id} as playing`);
       await db
         .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
         .bind(next.id)
@@ -427,7 +420,6 @@ app.post('/api/queue/:id/cycle', async (c) => {
     // 4. Fetch updated details for response tracking
     const updatedItem = await getQueueItem(db, id);
 
-    console.log(`[CYCLE-${requestId}] Cycle complete, returning response`);
     return c.json({ 
       message: 'Cycled', 
       item_id: id, 
