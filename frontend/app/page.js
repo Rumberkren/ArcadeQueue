@@ -244,6 +244,10 @@ export default function ArcadeQueueApp() {
   const [statusMessage, setStatusMessage] = useState({ type: 'info', text: 'Welcome to ChuMaiCQ Arcade Queue Manager' }); // General status messages
   const isSubmittingQueueRef = useRef(false); // Ref to track if a queue submission is in progress
   const finishTriggeredRef = useRef(false); // Prevent duplicate finishGame calls for a session
+  const selectedCabinetIdRef = useRef(selectedCabinetId);
+  useEffect(() => {
+    selectedCabinetIdRef.current = selectedCabinetId;
+  }, [selectedCabinetId]);
 
   // Permissions
   const [isMod, setIsMod] = useState(false); // Whether the user is a moderator
@@ -508,20 +512,19 @@ export default function ArcadeQueueApp() {
   
 
     // R2 - simplified
-  const fetchCabinets = useCallback(async ()  => {
-
+  const fetchCabinets = useCallback(async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/api/cabinets`);
       if (Array.isArray(response.data)) {
         setCabinets(response.data);
-        if (response.data.length > 0 && !selectedCabinetId) {
+        if (response.data.length > 0 && !selectedCabinetIdRef.current) {
           setSelectedCabinetId(response.data[0].id);
         }
       }
     } catch (error) {
       setStatusMessage({ type: 'error', text: 'Failed to fetch cabinets.' });
     }
-  }, [selectedCabinetId]);
+  }, []);
 
 
   // --- Initial setup and data fetching ---
@@ -531,23 +534,24 @@ export default function ArcadeQueueApp() {
     fetchCabinets();
     checkGeolocation();
     checkDbHealth();
-    
+
     const healthInterval = setInterval(checkDbHealth, 447000);
     const geolocationInterval = setInterval(checkGeolocation, 60000);
-    
+
     const queueInterval = setInterval(() => {
       fetchCabinets();
-      if (selectedCabinetId) {
-        fetchQueue(selectedCabinetId, true); // true for silent mode
+      // Read the latest value via ref — no stale closure, no re-running this effect
+      if (selectedCabinetIdRef.current) {
+        fetchQueue(selectedCabinetIdRef.current, true);
       }
     }, 5000);
-    
+
     return () => {
       clearInterval(healthInterval);
       clearInterval(queueInterval);
       clearInterval(geolocationInterval);
     };
-  }, [fetchCabinets, fetchQueue, selectedCabinetId, checkGeolocation, checkDbHealth]);
+  }, []); // runs once on mount — fetchCabinets/fetchQueue are now stable
 
   // Fetch server-side computed remaining seconds when selected cabinet changes
   const fetchServerRemaining = useCallback(async (cabinetId) => {
@@ -764,8 +768,7 @@ export default function ArcadeQueueApp() {
     finishTriggeredRef.current = true;
     setIsSubmitting(true);
 
-    // Optimistically clear the session variables to stop timers and UI updates immediately
-    setCurrentSessionPoll(null); 
+    setCurrentSessionPoll(null);
     setRemainingSeconds(null);
 
     try {
@@ -774,17 +777,16 @@ export default function ArcadeQueueApp() {
         : `${QUEUE_API_URL}/${currentSession.id}/finish`;
 
       await axios.post(endpoint, { owner_id: clientId });
-      
-      // Refresh datasets synchronously
+
       await fetchCabinets();
-      if (selectedCabinetId) {
-        await fetchQueue(selectedCabinetId, true);
+      if (selectedCabinetIdRef.current) {
+        await fetchQueue(selectedCabinetIdRef.current, true);
       }
-      
+
       setStatusMessage({ type: 'success', text: 'Finished current session.' });
     } catch (error) {
       setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
-    } {
+    } finally {                    // ← was a bare block `} {` before
       setIsSubmitting(false);
       setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
     }

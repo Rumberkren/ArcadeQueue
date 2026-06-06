@@ -170,7 +170,8 @@ const getCabinetQueuePayload = async (db, cabinetId) => {
     .all();
 
   const items = (itemsResult.results || []).map(formatQueueItem);
-  const currentSession = items.find(item => item.is_playing) || (items.length > 0 ? items[0] : null);
+  // is_playing is now always truthful in the DB — no fallback needed
+  const currentSession = items.find(item => item.is_playing) || null;
 
   return {
     current_session: currentSession,
@@ -271,12 +272,77 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
   return c.json({ message: 'Reordered' });
 });
 
-app.get('/api/queue', async (c) => {
-  // await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+app.post('/api/queue', async (c) => {
+  const body = await c.req.json();
 
-  const queueResult = await c.env.arcadeq.prepare('SELECT * FROM queue_items ORDER BY position ASC').all();
-  const items = (queueResult.results || []).map(formatQueueItem);
-  return c.json(items);
+  const cabinetId = body?.cabinet_id;
+  const type = String(body?.type || '').trim();
+  const ownerId = body?.owner_id ? String(body.owner_id) : null;
+
+  const players = normalizePlayers(body?.players || []);
+  if (!['solo', 'duo'].includes(type)) {
+    return c.json({ message: 'type must be solo or duo' }, { status: 422 });
+  }
+
+  const cabinet = await getCabinet(c.env.arcadeq, cabinetId);
+  if (!cabinet) {
+    return c.json({ message: 'cabinet_id must point to an existing cabinet' }, { status: 422 });
+  }
+
+  const requestHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify({
+    cabinet_id: cabinetId,
+    type,
+    players,
+    owner_id: ownerId,
+  })));
+  const hash = Array.from(new Uint8Array(requestHash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  const existing = await c.env.arcadeq
+    .prepare('SELECT * FROM queue_items WHERE request_hash = ?')
+    .bind(hash)
+    .first();
+
+  if (existing) {
+    return c.json(formatQueueItem(existing), { status: 200 });
+  }
+
+  const maxResult = await c.env.arcadeq
+    .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
+    .bind(cabinetId)
+    .first();
+  const position = (maxResult?.max_position ?? 0) + 1;
+
+  // Check if queue is currently empty — if so, this item should auto-start
+  const existingCount = await c.env.arcadeq
+    .prepare('SELECT COUNT(*) AS cnt FROM queue_items WHERE cabinet_id = ?')
+    .bind(cabinetId)
+    .first();
+  const isFirst = (existingCount?.cnt ?? 0) === 0;
+
+  await c.env.arcadeq
+    .prepare(
+      'INSERT INTO queue_items (cabinet_id, type, players, position, request_hash, owner_id, is_playing, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime("now"), datetime("now"))'
+    )
+    .bind(
+      cabinetId,
+      type,
+      JSON.stringify(players),
+      position,
+      hash,
+      ownerId,
+      isFirst ? 1 : 0,
+      isFirst ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null
+    )
+    .run();
+
+  const inserted = await c.env.arcadeq
+    .prepare('SELECT * FROM queue_items WHERE request_hash = ?')
+    .bind(hash)
+    .first();
+
+  return c.json(formatQueueItem(inserted), { status: 201 });
 });
 
 app.get('/api/queue/:cabinetId/time-to-finish', async (c) => {
