@@ -786,7 +786,7 @@ export default function ArcadeQueueApp() {
       setStatusMessage({ type: 'success', text: 'Finished current session.' });
     } catch (error) {
       setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
-    } finally {                    // ← was a bare block `} {` before
+    } finally {
       setIsSubmitting(false);
       setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
     }
