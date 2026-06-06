@@ -572,56 +572,53 @@ export default function ArcadeQueueApp() {
 
   // Auto-finish countdown for current session (client-side indicator)
   useEffect(() => {
-    let timer = null;
-    if (currentSession && currentSession.started_at) {
-      finishTriggeredRef.current = false; // reset when session starts
-      const update = () => {
-        try {
-          const started = new Date(currentSession.started_at);
-          const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
-          const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
-          setRemainingSeconds(remain);
+  let timer = null;
 
-          // Reduced logging: only every 5 minutes (300s), when 10s remain, or at 0s
-          const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
-          if (shouldLog) {
-            try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
-            try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
-          }
+  if (currentSession && currentSession.started_at) {
+    finishTriggeredRef.current = false;
 
-          // When timer hits zero, trigger finishGame once and stop the interval until next session
-          if (remain <= 0 && !finishTriggeredRef.current) {
-            try {
-              // Only auto-finish if the client has permission (mod) or owns the current session
-              const allowedToFinish = isMod || (currentSession && currentSession.owner_id === clientId);
-              if (allowedToFinish) {
-                // call finishGame asynchronously; it will refresh cabinets which will render next queue
-                finishGame();
-              } else {
-                setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
-              }
-            } catch (e) {
-              console.debug('finishGame call failed', e);
-            }
-            // stop local ticking until the next session mounts
-            if (timer) clearInterval(timer);
-            setRemainingSeconds(null);
-          }
-        } catch (e) {
-          setRemainingSeconds(null);
+    const sessionId = currentSession.id;
+
+    const update = () => {
+      try {
+        const started = new Date(currentSession.started_at);
+        const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+        const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
+        setRemainingSeconds(remain);
+
+        const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
+        if (shouldLog) {
+          try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
+          try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
         }
-      };
-      update();
-      timer = setInterval(update, 1000);
-    } else {
-      setRemainingSeconds(null);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-      finishTriggeredRef.current = false;
-    };
-  }, [currentSession, isMod, clientId]);
 
+        if (remain <= 0 && !finishTriggeredRef.current) {
+          finishTriggeredRef.current = true;
+          if (timer) clearInterval(timer);
+          setRemainingSeconds(null);
+
+          const allowedToFinish = isMod || (currentSession && currentSession.owner_id === clientId);
+          if (allowedToFinish) {
+            finishGame();
+          } else {
+            setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
+          }
+        }
+      } catch (e) {
+        setRemainingSeconds(null);
+      }
+    };
+
+    update();
+    timer = setInterval(update, 1000);
+  } else {
+    setRemainingSeconds(null);
+  }
+
+  return () => {
+    if (timer) clearInterval(timer);
+  };
+}, [currentSession, isMod, clientId]);
   
 
   // --- Cabinet Actions ---
