@@ -100,12 +100,9 @@ const finishQueueItem = async (db, item) => {
   const maxPosition = maxResult?.max_position ?? 0;
 
   await db.batch([
-    { sql: 'BEGIN' },
-    {
-      sql: 'UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?',
-      bindings: [maxPosition + 1, item.id],
-    },
-    { sql: 'COMMIT' },
+    db.prepare('BEGIN').bind(),
+    db.prepare('UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?').bind(maxPosition + 1, item.id),
+    db.prepare('COMMIT').bind(),
   ]);
 
   const next = await db
@@ -372,34 +369,53 @@ app.delete('/api/queue/:id', async (c) => {
 });
 
 app.post('/api/queue/:id/cycle', async (c) => {
-  const id = c.req.param('id');
-  const item = await getQueueItem(c.env.arcadeq, id);
-  if (!item) {
-    return c.json({ message: 'Queue item not found' }, { status: 404 });
-  }
+  try {
+    const id = c.req.param('id');
+    const item = await getQueueItem(c.env.arcadeq, id);
+    if (!item) {
+      return c.json({ message: 'Queue item not found' }, { status: 404 });
+    }
 
-  await c.env.arcadeq.batch([
-    { sql: 'BEGIN IMMEDIATE' },
-    {
-      sql: 'UPDATE queue_items SET position = COALESCE((SELECT MAX(position) FROM queue_items WHERE cabinet_id = ? AND id != ?), 0) + 1, is_playing = 0, started_at = NULL WHERE id = ?',
-      bindings: [item.cabinet_id, id, id],
-    },
-    { sql: 'COMMIT' },
-  ]);
+    // Fetch the max position for this cabinet
+    const maxResult = await c.env.arcadeq
+      .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ? AND id != ?')
+      .bind(item.cabinet_id, id)
+      .first();
+    const maxPosition = maxResult?.max_position ?? 0;
+    const newPosition = maxPosition + 1;
 
-  const next = await c.env.arcadeq
-    .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1')
-    .bind(item.cabinet_id, id)
-    .first();
-
-  if (next && !next.started_at) {
+    // Update the current item to the end of queue
     await c.env.arcadeq
-      .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
-      .bind(next.id)
+      .prepare('UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?')
+      .bind(newPosition, id)
       .run();
-  }
 
-  return c.json({ message: 'Cycled' });
+    // Get the next item (now at position 1)
+    const next = await c.env.arcadeq
+      .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1')
+      .bind(item.cabinet_id, id)
+      .first();
+
+    // Mark the next item as playing
+    if (next && !next.started_at) {
+      await c.env.arcadeq
+        .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
+        .bind(next.id)
+        .run();
+    }
+
+    return c.json({ message: 'Cycled' });
+  } catch (error) {
+    console.error('Cycle endpoint error:', {
+      message: error?.message,
+      cause: error?.cause,
+      stack: error?.stack,
+    });
+    return c.json({ 
+      message: 'Error cycling queue', 
+      error: error?.message,
+    }, { status: 500 });
+  }
 });
 
 app.post('/api/queue/:id/finish', async (c) => {
