@@ -378,17 +378,11 @@ app.post('/api/queue/:id/cycle', async (c) => {
     return c.json({ message: 'Queue item not found' }, { status: 404 });
   }
 
-  const maxResult = await c.env.arcadeq
-    .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
-    .bind(item.cabinet_id)
-    .first();
-  const maxPosition = maxResult?.max_position ?? 0;
-
   await c.env.arcadeq.batch([
-    { sql: 'BEGIN' },
+    { sql: 'BEGIN IMMEDIATE' },
     {
-      sql: 'UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?',
-      bindings: [maxPosition + 1, id],
+      sql: 'UPDATE queue_items SET position = COALESCE((SELECT MAX(position) FROM queue_items WHERE cabinet_id = ? AND id != ?), 0) + 1, is_playing = 0, started_at = NULL WHERE id = ?',
+      bindings: [item.cabinet_id, id, id],
     },
     { sql: 'COMMIT' },
   ]);
