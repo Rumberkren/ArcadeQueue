@@ -181,7 +181,7 @@ app.get('/api/health', async (c) => {
 });
 
 app.get('/api/cabinets', async (c) => {
-  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+  // await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
   const cabinets = await loadCabinetsWithItems(c.env.arcadeq);
   return c.json(cabinets);
 });
@@ -265,7 +265,7 @@ app.patch('/api/cabinets/:id/reorder', async (c) => {
 });
 
 app.get('/api/queue', async (c) => {
-  await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
+  // await expireOldItems(c.env.arcadeq, getAutoFinishMinutes(c));
 
   const queueResult = await c.env.arcadeq.prepare('SELECT * FROM queue_items ORDER BY position ASC').all();
   const items = (queueResult.results || []).map(formatQueueItem);
@@ -538,4 +538,13 @@ app.patch('/api/queue/:id', async (c) => {
 });
 
 // Export the Hono app as the default export so Wrangler publishes an ESM worker.
-export default app;
+export default {
+  fetch: app.fetch, // Handles all your frontend API endpoints safely
+  
+  // Handles background cleanups on a strict clock rhythm
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      expireOldItems(env.arcadeq, 17) // Put your default duration minutes here
+    );
+  }
+};

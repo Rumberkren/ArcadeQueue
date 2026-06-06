@@ -1,8 +1,14 @@
 name = "arcadequeue-cloudflare-api"
 main = "worker.js"
 compatibility_date = "2026-05-20"
+compatibility_flags = [ "nodejs_compat" ] # Good practice for modern packages/axios utilities
+
 [vars]
 AUTO_FINISH_MINUTES = "17"
+
 [[d1_databases]]
 binding = "arcadeq"
 database_name = "arcadeq"
+
+[triggers]
+crons = ["* * * * *"] # Runs exactly once every minute
