@@ -369,44 +369,57 @@ app.delete('/api/queue/:id', async (c) => {
 });
 
 app.post('/api/queue/:id/cycle', async (c) => {
+  const requestId = Math.random().toString(36).substring(7);
+  console.log(`[CYCLE-${requestId}] Starting cycle for item ${c.req.param('id')}`);
+  
   try {
     const id = c.req.param('id');
     const item = await getQueueItem(c.env.arcadeq, id);
+    
     if (!item) {
+      console.log(`[CYCLE-${requestId}] Item not found: ${id}`);
       return c.json({ message: 'Queue item not found' }, { status: 404 });
     }
 
-    // Fetch the max position for this cabinet
+    console.log(`[CYCLE-${requestId}] Found item at position ${item.position}, cabinet ${item.cabinet_id}`);
+
+    // Fetch MAX position EXCLUDING the current item
     const maxResult = await c.env.arcadeq
       .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ? AND id != ?')
       .bind(item.cabinet_id, id)
       .first();
-    const maxPosition = maxResult?.max_position ?? 0;
-    const newPosition = maxPosition + 1;
+    
+    const newPosition = (maxResult?.max_position ?? 0) + 1;
+    console.log(`[CYCLE-${requestId}] Moving item ${id} from position ${item.position} to ${newPosition}`);
 
-    // Update the current item to the end of queue
+    // Simple UPDATE - no transaction needed
     await c.env.arcadeq
       .prepare('UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?')
       .bind(newPosition, id)
       .run();
 
-    // Get the next item (now at position 1)
+    console.log(`[CYCLE-${requestId}] Updated item position to ${newPosition}`);
+
+    // Mark next item as playing
     const next = await c.env.arcadeq
       .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1')
       .bind(item.cabinet_id, id)
       .first();
 
-    // Mark the next item as playing
+    console.log(`[CYCLE-${requestId}] Next item found: ${next ? `id ${next.id} at position ${next.position}` : 'none'}`);
+
     if (next && !next.started_at) {
+      console.log(`[CYCLE-${requestId}] Marking item ${next.id} as playing`);
       await c.env.arcadeq
         .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
         .bind(next.id)
         .run();
     }
 
-    return c.json({ message: 'Cycled' });
+    console.log(`[CYCLE-${requestId}] Cycle complete, returning response`);
+    return c.json({ message: 'Cycled', item_id: id, new_position: newPosition });
   } catch (error) {
-    console.error('Cycle endpoint error:', {
+    console.error(`[CYCLE-${requestId}] ERROR:`, {
       message: error?.message,
       cause: error?.cause,
       stack: error?.stack,
