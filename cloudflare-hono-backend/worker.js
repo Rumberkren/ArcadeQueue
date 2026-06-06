@@ -3,6 +3,13 @@ import { cors } from 'hono/cors';
 
 const app = new Hono();
 app.use('*', cors({ origin: '*' }));
+app.use('/api/*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  exposeHeaders: ['Content-Length'],
+  maxAge: 86400, // <-- CRITICAL: Tells the browser to remember this approval for 24 hours so it stops sending OPTIONS every 5 seconds!
+}));
 
 let schemaInitialized = false;
 
@@ -539,12 +546,9 @@ app.patch('/api/queue/:id', async (c) => {
 
 // Export the Hono app as the default export so Wrangler publishes an ESM worker.
 export default {
-  fetch: app.fetch, // Handles all your frontend API endpoints safely
-  
-  // Handles background cleanups on a strict clock rhythm
+  fetch: app.fetch,
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(
-      expireOldItems(env.arcadeq, 17) // Put your default duration minutes here
-    );
+    const autoFinishMinutes = parseInt(env.AUTO_FINISH_MINUTES, 10) || 17;
+    ctx.waitUntil(expireOldItems(env.arcadeq, autoFinishMinutes));
   }
 };
