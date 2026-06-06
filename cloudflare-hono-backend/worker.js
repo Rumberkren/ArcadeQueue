@@ -388,7 +388,7 @@ app.post('/api/queue/:id/cycle', async (c) => {
     { sql: 'BEGIN' },
     {
       sql: 'UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?',
-      bindings: [maxPosition, id],
+      bindings: [maxPosition + 1, id],
     },
     { sql: 'COMMIT' },
   ]);
