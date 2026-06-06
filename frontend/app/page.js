@@ -243,7 +243,7 @@ export default function ArcadeQueueApp() {
   const [currentSessionPoll, setCurrentSessionPoll] = useState(null); // Current session polled separately
   const [statusMessage, setStatusMessage] = useState({ type: 'info', text: 'Welcome to ChuMaiCQ Arcade Queue Manager' }); // General status messages
   const isSubmittingQueueRef = useRef(false); // Ref to track if a queue submission is in progress
-  const finishTriggeredRef = useRef(false); // Prevent duplicate finishGame calls for a session
+  const finishTriggeredRef = useRef(null); // Prevent duplicate finishGame calls for a session
   const selectedCabinetIdRef = useRef(selectedCabinetId);
   useEffect(() => {
     selectedCabinetIdRef.current = selectedCabinetId;
@@ -479,8 +479,8 @@ export default function ArcadeQueueApp() {
 
   // Get the current session (the first item in the queue_items)
   const currentSession = useMemo(() => {
-    return currentSessionPoll || (selectedCabinet?.queue_items?.length > 0 ? selectedCabinet.queue_items[0] : null);
-  }, [selectedCabinet, currentSessionPoll]);
+    return currentSessionPoll ?? null;
+  }, [currentSessionPoll]);
           
   const fetchQueue = useCallback(async (cabinetId, silent = false) => {
     if (!cabinetId) return;
@@ -572,53 +572,58 @@ export default function ArcadeQueueApp() {
 
   // Auto-finish countdown for current session (client-side indicator)
   useEffect(() => {
-  let timer = null;
+    let timer = null;
 
-  if (currentSession && currentSession.started_at) {
-    finishTriggeredRef.current = false;
+    if (currentSession && currentSession.started_at) {
+      const sessionId = currentSession.id;
 
-    const sessionId = currentSession.id;
-
-    const update = () => {
-      try {
-        const started = new Date(currentSession.started_at);
-        const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
-        const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
-        setRemainingSeconds(remain);
-
-        const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
-        if (shouldLog) {
-          try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
-          try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
-        }
-
-        if (remain <= 0 && !finishTriggeredRef.current) {
-          finishTriggeredRef.current = true;
-          if (timer) clearInterval(timer);
-          setRemainingSeconds(null);
-
-          const allowedToFinish = isMod || (currentSession && currentSession.owner_id === clientId);
-          if (allowedToFinish) {
-            finishGame();
-          } else {
-            setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
-          }
-        }
-      } catch (e) {
-        setRemainingSeconds(null);
+      // Reset guard only if this is a different session than what last triggered
+      if (finishTriggeredRef.current === sessionId) {
+        // Already fired for this session — do not restart the timer
+        return;
       }
+
+      const update = () => {
+        try {
+          const started = new Date(currentSession.started_at);
+          const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+          const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
+          setRemainingSeconds(remain);
+
+          const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
+          if (shouldLog) {
+            try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
+            try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
+          }
+
+          if (remain <= 0 && finishTriggeredRef.current !== sessionId) {
+            finishTriggeredRef.current = sessionId; // lock to THIS session ID
+            if (timer) clearInterval(timer);
+            setRemainingSeconds(null);
+
+            const allowedToFinish = isMod || (currentSession?.owner_id === clientId);
+            if (allowedToFinish) {
+              finishGame();
+            } else {
+              setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
+            }
+          }
+        } catch (e) {
+          setRemainingSeconds(null);
+        }
+      };
+
+      update();
+      timer = setInterval(update, 1000);
+    } else {
+      setRemainingSeconds(null);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+      // DO NOT reset finishTriggeredRef here
     };
-
-    update();
-    timer = setInterval(update, 1000);
-  } else {
-    setRemainingSeconds(null);
-  }
-
-  return () => {
-    if (timer) clearInterval(timer);
-  };
-}, [currentSession, isMod, clientId]);
+  }, [currentSession, isMod, clientId]);
   
 
   // --- Cabinet Actions ---
@@ -760,11 +765,10 @@ export default function ArcadeQueueApp() {
   // Finish the current game and cycle the queue
   const finishGame = async () => {
     if (!canEdit || !currentSession) return;
-    if (finishTriggeredRef.current || isSubmitting) return;
+    if (finishTriggeredRef.current === currentSession.id || isSubmitting) return;
 
-    finishTriggeredRef.current = true;
+    finishTriggeredRef.current = currentSession.id; // lock to this session
     setIsSubmitting(true);
-
     setCurrentSessionPoll(null);
     setRemainingSeconds(null);
 
@@ -785,7 +789,8 @@ export default function ArcadeQueueApp() {
       setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
     } finally {
       setIsSubmitting(false);
-      setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
+      // No setTimeout reset — the ref stays locked to the session ID
+      // It will only unlock when a genuinely new session.id appears
     }
   };
 
