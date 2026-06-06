@@ -100,9 +100,7 @@ const finishQueueItem = async (db, item) => {
   const maxPosition = maxResult?.max_position ?? 0;
 
   await db.batch([
-    db.prepare('BEGIN').bind(),
     db.prepare('UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?').bind(maxPosition + 1, item.id),
-    db.prepare('COMMIT').bind(),
   ]);
 
   const next = await db
@@ -383,62 +381,47 @@ app.post('/api/queue/:id/cycle', async (c) => {
 
     console.log(`[CYCLE-${requestId}] Found item at position ${item.position}, cabinet ${item.cabinet_id}`);
 
-    // Start transaction to ensure atomic updates
-    await c.env.arcadeq.prepare('BEGIN').bind().run();
-
-    try {
+    // Execute all updates in batch without explicit transaction (D1 handles atomicity)
+    await c.env.arcadeq.batch([
       // Step 1: Remove the current item from the queue (set is_playing=0, started_at=NULL)
-      await c.env.arcadeq
-        .prepare('UPDATE queue_items SET is_playing = 0, started_at = NULL WHERE id = ?')
-        .bind(id)
-        .run();
-
-      console.log(`[CYCLE-${requestId}] Cleared playing state for item ${id}`);
+      c.env.arcadeq.prepare('UPDATE queue_items SET is_playing = 0, started_at = NULL WHERE id = ?').bind(id),
 
       // Step 2: Shift all items with position > current item's position down by 1
+      c.env.arcadeq.prepare('UPDATE queue_items SET position = position - 1 WHERE cabinet_id = ? AND position > ? AND id != ?').bind(item.cabinet_id, item.position, id),
+    ]);
+
+    console.log(`[CYCLE-${requestId}] Cleared playing state and shifted positions`);
+
+    // Step 3: Move the current item to the end
+    const countResult = await c.env.arcadeq
+      .prepare('SELECT COUNT(*) as count FROM queue_items WHERE cabinet_id = ? AND id != ?')
+      .bind(item.cabinet_id, id)
+      .first();
+    
+    const newPosition = countResult?.count ?? 0;
+    await c.env.arcadeq
+      .prepare('UPDATE queue_items SET position = ? WHERE id = ?')
+      .bind(newPosition, id)
+      .run();
+
+    console.log(`[CYCLE-${requestId}] Moved item ${id} to position ${newPosition}`);
+
+    // Step 4: Find and mark the first item as playing
+    const next = await c.env.arcadeq
+      .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1')
+      .bind(item.cabinet_id)
+      .first();
+
+    if (next) {
+      console.log(`[CYCLE-${requestId}] Marking item ${next.id} as playing`);
       await c.env.arcadeq
-        .prepare('UPDATE queue_items SET position = position - 1 WHERE cabinet_id = ? AND position > ? AND id != ?')
-        .bind(item.cabinet_id, item.position, id)
+        .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
+        .bind(next.id)
         .run();
-
-      console.log(`[CYCLE-${requestId}] Shifted positions down for items after position ${item.position}`);
-
-      // Step 3: Move the current item to the end
-      const countResult = await c.env.arcadeq
-        .prepare('SELECT COUNT(*) as count FROM queue_items WHERE cabinet_id = ? AND id != ?')
-        .bind(item.cabinet_id, id)
-        .first();
-      
-      const newPosition = countResult?.count ?? 0;
-      await c.env.arcadeq
-        .prepare('UPDATE queue_items SET position = ? WHERE id = ?')
-        .bind(newPosition, id)
-        .run();
-
-      console.log(`[CYCLE-${requestId}] Moved item ${id} to position ${newPosition}`);
-
-      // Step 4: Find and mark the first item as playing
-      const next = await c.env.arcadeq
-        .prepare('SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1')
-        .bind(item.cabinet_id)
-        .first();
-
-      if (next) {
-        console.log(`[CYCLE-${requestId}] Marking item ${next.id} as playing`);
-        await c.env.arcadeq
-          .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
-          .bind(next.id)
-          .run();
-      }
-
-      // Commit transaction
-      await c.env.arcadeq.prepare('COMMIT').bind().run();
-      console.log(`[CYCLE-${requestId}] Cycle complete, returning response`);
-      return c.json({ message: 'Cycled', item_id: id, new_position: newPosition });
-    } catch (innerError) {
-      await c.env.arcadeq.prepare('ROLLBACK').bind().run();
-      throw innerError;
     }
+
+    console.log(`[CYCLE-${requestId}] Cycle complete, returning response`);
+    return c.json({ message: 'Cycled', item_id: id, new_position: newPosition });
   } catch (error) {
     console.error(`[CYCLE-${requestId}] ERROR:`, {
       message: error?.message,
