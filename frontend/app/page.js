@@ -771,15 +771,14 @@ export default function ArcadeQueueApp() {
   setRemainingSeconds(null);
 
   try {
-    // Standardize onto the main finish endpoint
-    const endpoint = `${QUEUE_API_URL}/${currentSession.id}/finish`;
+    const endpoint = `${QUEUE_API_URL}/${currentSession.id}/cycle`;
     await axios.post(endpoint, { owner_id: clientId });
     
     await fetchCabinets();
     if (selectedCabinetIdRef.current) {
       await fetchQueue(selectedCabinetIdRef.current, true);
     }
-    setStatusMessage({ type: 'success', text: 'Finished current session.' });
+    setStatusMessage({ type: 'success', text: 'Moved current player to the bottom of the queue.' });
   } catch (error) {
     setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
   } finally {
@@ -1187,7 +1186,7 @@ export default function ArcadeQueueApp() {
                 </div>
               )}
             </div>
-            <div className="col-span-3 justify-self-center pt-4">
+            {/* <div className="col-span-3 justify-self-center pt-4">
               <h3 className="text-sm text-slate-500 flex items-center gap-2">
                 Time till next in queue:
                 {typeof remainingSeconds === 'number' ? (
@@ -1198,7 +1197,7 @@ export default function ArcadeQueueApp() {
                   <span className="text-xs text-slate-400">—</span>
                 )}
               </h3>
-            </div>
+            </div> */}
             
           </div>
 

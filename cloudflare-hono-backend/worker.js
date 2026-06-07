@@ -100,18 +100,30 @@ const getQueueItem = async (db, id) => {
 const finishQueueItem = async (db, item) => {
   if (!item) return;
 
-  // Instead of reordering it back to the end of the queue (which caused looping),
-  // we delete it from the queue entirely.
-  await db.prepare('DELETE FROM queue_items WHERE id = ?').bind(item.id).run();
-
-  // Find the next player at the front of the line
-  const next = await db
-    .prepare(
-      'SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1'
-    )
+  // 1. Find the highest position currently in the queue for this cabinet
+  const maxResult = await db
+    .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
     .bind(item.cabinet_id)
     .first();
+  const maxPosition = maxResult?.max_position ?? 0;
 
+  // 2. Push the finished game to the bottom of the queue (maxPosition + 1)
+  // and clear out its playing status/start timer flags
+  await db.prepare(
+    'UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?'
+  )
+  .bind(maxPosition + 1, item.id)
+  .run();
+
+  // 3. Find the next player who should step up to the cabinet
+  const next = await db
+    .prepare(
+      'SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1'
+    )
+    .bind(item.cabinet_id, item.id)
+    .first();
+
+  // 4. Activate the next session at the front of the queue
   if (next) {
     await db
       .prepare('UPDATE queue_items SET started_at = datetime("now"), is_playing = 1 WHERE id = ?')
