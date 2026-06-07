@@ -571,59 +571,59 @@ export default function ArcadeQueueApp() {
   }, [selectedCabinetId, fetchServerRemaining]);
 
   // Auto-finish countdown for current session (client-side indicator)
-  useEffect(() => {
-    let timer = null;
+  // useEffect(() => {
+  //   let timer = null;
 
-    if (currentSession && currentSession.started_at) {
-      const sessionId = currentSession.id;
+  //   if (currentSession && currentSession.started_at) {
+  //     const sessionId = currentSession.id;
 
-      // Reset guard only if this is a different session than what last triggered
-      if (finishTriggeredRef.current === sessionId) {
-        // Already fired for this session — do not restart the timer
-        return;
-      }
+  //     // Reset guard only if this is a different session than what last triggered
+  //     if (finishTriggeredRef.current === sessionId) {
+  //       // Already fired for this session — do not restart the timer
+  //       return;
+  //     }
 
-      const update = () => {
-        try {
-          const started = new Date(currentSession.started_at);
-          const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
-          const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
-          setRemainingSeconds(remain);
+  //     const update = () => {
+  //       try {
+  //         const started = new Date(currentSession.started_at);
+  //         const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+  //         const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
+  //         setRemainingSeconds(remain);
 
-          const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
-          if (shouldLog) {
-            try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
-            try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
-          }
+  //         const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
+  //         if (shouldLog) {
+  //           try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
+  //           try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
+  //         }
 
-          if (remain <= 0 && finishTriggeredRef.current !== sessionId) {
-            finishTriggeredRef.current = sessionId; // lock to THIS session ID
-            if (timer) clearInterval(timer);
-            setRemainingSeconds(null);
+  //         if (remain <= 0 && finishTriggeredRef.current !== sessionId) {
+  //           finishTriggeredRef.current = sessionId; // lock to THIS session ID
+  //           if (timer) clearInterval(timer);
+  //           setRemainingSeconds(null);
 
-            const allowedToFinish = isMod || (currentSession?.owner_id === clientId);
-            if (allowedToFinish) {
-              finishGame();
-            } else {
-              setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
-            }
-          }
-        } catch (e) {
-          setRemainingSeconds(null);
-        }
-      };
+  //           const allowedToFinish = isMod || (currentSession?.owner_id === clientId);
+  //           if (allowedToFinish) {
+  //             finishGame();
+  //           } else {
+  //             setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
+  //           }
+  //         }
+  //       } catch (e) {
+  //         setRemainingSeconds(null);
+  //       }
+  //     };
 
-      update();
-      timer = setInterval(update, 1000);
-    } else {
-      setRemainingSeconds(null);
-    }
+  //     update();
+  //     timer = setInterval(update, 1000);
+  //   } else {
+  //     setRemainingSeconds(null);
+  //   }
 
-    return () => {
-      if (timer) clearInterval(timer);
-      // DO NOT reset finishTriggeredRef here
-    };
-  }, [currentSession, isMod, clientId]);
+  //   return () => {
+  //     if (timer) clearInterval(timer);
+  //     // DO NOT reset finishTriggeredRef here
+  //   };
+  // }, [currentSession, isMod, clientId]);
   
 
   // --- Cabinet Actions ---
@@ -764,35 +764,28 @@ export default function ArcadeQueueApp() {
 
   // Finish the current game and cycle the queue
   const finishGame = async () => {
-    if (!canEdit || !currentSession) return;
-    if (finishTriggeredRef.current === currentSession.id || isSubmitting) return;
+  if (!canEdit || !currentSession || isSubmitting) return;
 
-    finishTriggeredRef.current = currentSession.id; // lock to this session
-    setIsSubmitting(true);
-    setCurrentSessionPoll(null);
-    setRemainingSeconds(null);
+  setIsSubmitting(true);
+  setCurrentSessionPoll(null);
+  setRemainingSeconds(null);
 
-    try {
-      const endpoint = isMod
-        ? `${QUEUE_API_URL}/${currentSession.id}/cycle`
-        : `${QUEUE_API_URL}/${currentSession.id}/finish`;
-
-      await axios.post(endpoint, { owner_id: clientId });
-
-      await fetchCabinets();
-      if (selectedCabinetIdRef.current) {
-        await fetchQueue(selectedCabinetIdRef.current, true);
-      }
-
-      setStatusMessage({ type: 'success', text: 'Finished current session.' });
-    } catch (error) {
-      setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
-    } finally {
-      setIsSubmitting(false);
-      // No setTimeout reset — the ref stays locked to the session ID
-      // It will only unlock when a genuinely new session.id appears
+  try {
+    // Standardize onto the main finish endpoint
+    const endpoint = `${QUEUE_API_URL}/${currentSession.id}/finish`;
+    await axios.post(endpoint, { owner_id: clientId });
+    
+    await fetchCabinets();
+    if (selectedCabinetIdRef.current) {
+      await fetchQueue(selectedCabinetIdRef.current, true);
     }
-  };
+    setStatusMessage({ type: 'success', text: 'Finished current session.' });
+  } catch (error) {
+    setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   // Start hold timer for finish button (3s -> open delete confirmation)
   const startHoldFinishTimer = () => {

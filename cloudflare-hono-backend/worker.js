@@ -100,21 +100,16 @@ const getQueueItem = async (db, id) => {
 const finishQueueItem = async (db, item) => {
   if (!item) return;
 
-  const maxResult = await db
-    .prepare('SELECT MAX(position) AS max_position FROM queue_items WHERE cabinet_id = ?')
-    .bind(item.cabinet_id)
-    .first();
-  const maxPosition = maxResult?.max_position ?? 0;
+  // Instead of reordering it back to the end of the queue (which caused looping),
+  // we delete it from the queue entirely.
+  await db.prepare('DELETE FROM queue_items WHERE id = ?').bind(item.id).run();
 
-  await db.batch([
-    db.prepare('UPDATE queue_items SET position = ?, is_playing = 0, started_at = NULL WHERE id = ?').bind(maxPosition + 1, item.id),
-  ]);
-
+  // Find the next player at the front of the line
   const next = await db
     .prepare(
-      'SELECT * FROM queue_items WHERE cabinet_id = ? AND id != ? ORDER BY position ASC LIMIT 1'
+      'SELECT * FROM queue_items WHERE cabinet_id = ? ORDER BY position ASC LIMIT 1'
     )
-    .bind(item.cabinet_id, item.id)
+    .bind(item.cabinet_id)
     .first();
 
   if (next) {
