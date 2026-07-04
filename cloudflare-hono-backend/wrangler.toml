@@ -1,5 +1,5 @@
 name = "arcadequeue-cloudflare-api"
-main = "worker.js"
+main = "src/index.js"
 compatibility_date = "2026-05-20"
 compatibility_flags = [ "nodejs_compat" ] # Good practice for modern packages/axios utilities
 

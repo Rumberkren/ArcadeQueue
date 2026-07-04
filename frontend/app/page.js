@@ -51,7 +51,7 @@ const LOCATIONS = [
   },
 ]
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''; // Base URL for API
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL; // Base URL for API
 // Parse NEXT_PUBLIC_MOD_ACCESS safely: prefer JSON, fallback to comma-separated list
 let API_ACCESS = [];
 const _rawModAccess = process.env.NEXT_PUBLIC_MOD_ACCESS || '';
@@ -70,9 +70,7 @@ if (_rawModAccess) {
 }
 const AUTO_FINISH_MINUTES = parseInt(process.env.NEXT_PUBLIC_AUTO_FINISH_MINUTES) || 17; // Auto-finish time limit (client)
 
-if (!API_BASE_URL) {
-  console.warn('NEXT_PUBLIC_API_URL is not defined in environment variables. API requests will fail until it is provided.');
-}
+if (!API_BASE_URL) throw new Error('NEXT_PUBLIC_API_URL is not defined in environment variables');
 if (API_ACCESS.length === 0) console.warn('No NEXT_PUBLIC_MOD_ACCESS codes defined in environment variables');
 
 // Login Modal Component
@@ -243,11 +241,7 @@ export default function ArcadeQueueApp() {
   const [currentSessionPoll, setCurrentSessionPoll] = useState(null); // Current session polled separately
   const [statusMessage, setStatusMessage] = useState({ type: 'info', text: 'Welcome to ChuMaiCQ Arcade Queue Manager' }); // General status messages
   const isSubmittingQueueRef = useRef(false); // Ref to track if a queue submission is in progress
-  const finishTriggeredRef = useRef(null); // Prevent duplicate finishGame calls for a session
-  const selectedCabinetIdRef = useRef(selectedCabinetId);
-  useEffect(() => {
-    selectedCabinetIdRef.current = selectedCabinetId;
-  }, [selectedCabinetId]);
+  const finishTriggeredRef = useRef(false); // Prevent duplicate finishGame calls for a session
 
   // Permissions
   const [isMod, setIsMod] = useState(false); // Whether the user is a moderator
@@ -469,89 +463,85 @@ export default function ArcadeQueueApp() {
   }, [cabinets, selectedCabinetId]);
 
   // Get the queue items for the selected cabinet
-  // Fix derived states to look at the polled datasets:
   const queue = useMemo(() => {
-    if (queuePoll && queuePoll.length > 0) {
-      return currentSessionPoll ? queuePoll.filter(item => item.id !== currentSessionPoll.id) : queuePoll.slice(1);
-    }
+    
     return selectedCabinet?.queue_items?.slice(1) || [];
-  }, [selectedCabinet, queuePoll, currentSessionPoll]);
+  }, [selectedCabinet]);
 
   // Get the current session (the first item in the queue_items)
   const currentSession = useMemo(() => {
-    return currentSessionPoll ?? null;
-  }, [currentSessionPoll]);
-          
-  const fetchQueue = useCallback(async (cabinetId, silent = false) => {
-    if (!cabinetId) return;
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/queue/${cabinetId}`);
-      const { queue_items, current_session } = response.data;
-
-      const validatedQueue = (queue_items || []).map(item => ({
-        id: item.id,
-        players: Array.isArray(item.players)
-          ? item.players
-          : item.players
-          ? JSON.parse(item.players)
-          : [],
-        type: item.type,
-        isNext: !!item.is_next,
-        order: item.order
-      }));
-
-      setQueuePoll(validatedQueue);
-      setCurrentSessionPoll(current_session);
-      if(!silent) setStatusMessage({ type: 'success', text: 'Queue updated.' });
-    } catch (error) {
-      if(!silent) setStatusMessage({ type: 'error', text: 'Failed to fetch queue.' });
+    
+    const items = selectedCabinet?.queue_items;
+    if (items && items.length > 0) {
+      return items[0];
     }
+    return null;
+  }, [selectedCabinet]);
+          
+    const fetchQueue = useCallback(async (cabinetId, silent = false) => {
+      if (!cabinetId) return;
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/queue/${cabinetId}`);
+        const { queue_items, current_session } = response.data;
+
+        const validatedQueue = (queue_items || []).map(item => ({
+          id: item.id,
+          players: item.players ? JSON.parse(item.players) : [],
+          type: item.type,
+          isNext: !!item.is_next,
+          order: item.order
+        }));
+
+        setQueuePoll(validatedQueue);
+        setCurrentSessionPoll(current_session);
+        if(!silent) setStatusMessage({ type: 'success', text: 'Queue updated.' });
+      } catch (error) {
+        if(!silent) setStatusMessage({ type: 'error', text: 'Failed to fetch queue.' });
+      }
   }, []);
 
   // Fetch all cabinets
   
 
     // R2 - simplified
-  const fetchCabinets = useCallback(async () => {
+  const fetchCabinets = useCallback(async ()  => {
+
     try {
       const response = await axios.get(`${API_BASE_URL}/api/cabinets`);
       if (Array.isArray(response.data)) {
         setCabinets(response.data);
-        if (response.data.length > 0 && !selectedCabinetIdRef.current) {
+        if (response.data.length > 0 && !selectedCabinetId) {
           setSelectedCabinetId(response.data[0].id);
         }
       }
     } catch (error) {
       setStatusMessage({ type: 'error', text: 'Failed to fetch cabinets.' });
     }
-  }, []);
+  }, [selectedCabinetId]);
 
 
   // --- Initial setup and data fetching ---
 
   // Runs once on component mount and check location
   useEffect(() => {
+    
     fetchCabinets();
+    fetchQueue();
     checkGeolocation();
-    checkDbHealth();
-
+    checkDbHealth(); // check DB health on load
+    
+    // Set up periodic health check every 7 minutes 27 seconds
     const healthInterval = setInterval(checkDbHealth, 447000);
-    const geolocationInterval = setInterval(checkGeolocation, 60000);
-
-    const queueInterval = setInterval(() => {
-      fetchCabinets();
-      // Read the latest value via ref — no stale closure, no re-running this effect
-      if (selectedCabinetIdRef.current) {
-        fetchQueue(selectedCabinetIdRef.current, true);
-      }
-    }, 5000);
-
+    const geolocationInterval = setInterval(checkGeolocation, 60000); // Re-check geolocation every minute
+    const queueInterval = setInterval(fetchCabinets, 5000); // Poll every 5 seconds
+    
     return () => {
+
       clearInterval(healthInterval);
       clearInterval(queueInterval);
       clearInterval(geolocationInterval);
     };
-  }, []); // runs once on mount — fetchCabinets/fetchQueue are now stable
+  }, [fetchCabinets, checkGeolocation, checkDbHealth]);
 
   // Fetch server-side computed remaining seconds when selected cabinet changes
   const fetchServerRemaining = useCallback(async (cabinetId) => {
@@ -571,59 +561,83 @@ export default function ArcadeQueueApp() {
   }, [selectedCabinetId, fetchServerRemaining]);
 
   // Auto-finish countdown for current session (client-side indicator)
-  // useEffect(() => {
-  //   let timer = null;
+  useEffect(() => {
+    let timer = null;
+    if (currentSession && currentSession.started_at) {
+      finishTriggeredRef.current = false; // reset when session starts
+      const update = () => {
+        try {
+          const started = new Date(currentSession.started_at);
+          const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+          const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
+          setRemainingSeconds(remain);
 
-  //   if (currentSession && currentSession.started_at) {
-  //     const sessionId = currentSession.id;
+          // Reduced logging: only every 5 minutes (300s), when 10s remain, or at 0s
+          const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
+          if (shouldLog) {
+            try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
+            try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
+          }
 
-  //     // Reset guard only if this is a different session than what last triggered
-  //     if (finishTriggeredRef.current === sessionId) {
-  //       // Already fired for this session — do not restart the timer
-  //       return;
-  //     }
+          // When timer hits zero, trigger finishGame once and stop the interval until next session
+          // Auto-finish countdown for current session (client-side indicator)
+  useEffect(() => {
+    let timer = null;
+    
+    // 🛑 CRITICAL FIX: Only run the countdown if started_at exists AND is a valid timestamp
+    if (currentSession && currentSession.started_at && !isNaN(new Date(currentSession.started_at).getTime())) {
+      finishTriggeredRef.current = false; 
+      
+      const update = () => {
+        try {
+          const started = new Date(currentSession.started_at);
+          const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+          const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
+          setRemainingSeconds(remain);
 
-  //     const update = () => {
-  //       try {
-  //         const started = new Date(currentSession.started_at);
-  //         const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
-  //         const remain = Math.max(0, (AUTO_FINISH_MINUTES * 60) - elapsed);
-  //         setRemainingSeconds(remain);
+          // 🛑 CRITICAL FIX: Only trigger finish if remain is exactly 0 AND a finish isn't already active
+          if (remain === 0 && !finishTriggeredRef.current && !isSubmitting) {
+            const allowedToFinish = isMod || (currentSession && currentSession.owner_id === clientId);
+            if (allowedToFinish) {
+              console.log("Timer naturally expired to 0. Cycling queue...");
+              finishTriggeredRef.current = true; // Block immediately
+              finishGame();
+            } else {
+              setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
+            }
+            if (timer) clearInterval(timer);
+            setRemainingSeconds(null);
+          }
+        } catch (e) {
+          setRemainingSeconds(null);
+        }
+      };
+      
+      update();
+      timer = setInterval(update, 1000);
+    } else {
+      setRemainingSeconds(null);
+    }
+    
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [currentSession, isMod, clientId, isSubmitting]); // Added isSubmitting dependency to keep checks fresh
+        } catch (e) {
+          setRemainingSeconds(null);
+        }
+      };
+      update();
+      timer = setInterval(update, 1000);
+    } else {
+      setRemainingSeconds(null);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+      finishTriggeredRef.current = false;
+    };
+  }, [currentSession, isMod, clientId]);
 
-  //         const shouldLog = (remain % 300 === 0) || remain === 10 || remain === 0;
-  //         if (shouldLog) {
-  //           try { console.debug('auto-finish remainingSeconds', remain); } catch (e) {}
-  //           try { if (typeof window !== 'undefined') window.__remainingSeconds = remain; } catch (e) {}
-  //         }
-
-  //         if (remain <= 0 && finishTriggeredRef.current !== sessionId) {
-  //           finishTriggeredRef.current = sessionId; // lock to THIS session ID
-  //           if (timer) clearInterval(timer);
-  //           setRemainingSeconds(null);
-
-  //           const allowedToFinish = isMod || (currentSession?.owner_id === clientId);
-  //           if (allowedToFinish) {
-  //             finishGame();
-  //           } else {
-  //             setStatusMessage({ type: 'error', text: 'Auto-finish skipped: insufficient permission.' });
-  //           }
-  //         }
-  //       } catch (e) {
-  //         setRemainingSeconds(null);
-  //       }
-  //     };
-
-  //     update();
-  //     timer = setInterval(update, 1000);
-  //   } else {
-  //     setRemainingSeconds(null);
-  //   }
-
-  //   return () => {
-  //     if (timer) clearInterval(timer);
-  //     // DO NOT reset finishTriggeredRef here
-  //   };
-  // }, [currentSession, isMod, clientId]);
   
 
   // --- Cabinet Actions ---
@@ -764,27 +778,39 @@ export default function ArcadeQueueApp() {
 
   // Finish the current game and cycle the queue
   const finishGame = async () => {
-  if (!canEdit || !currentSession || isSubmitting) return;
+    // Basic prechecks
+    if (!canEdit || !currentSession) return;
 
-  setIsSubmitting(true);
-  setCurrentSessionPoll(null);
-  setRemainingSeconds(null);
+    // Prevent duplicate/parallel finish actions
+    if (finishTriggeredRef.current) return;
+    if (isSubmitting) return;
 
-  try {
-    const endpoint = `${QUEUE_API_URL}/${currentSession.id}/cycle`;
-    await axios.post(endpoint, { owner_id: clientId });
-    
-    await fetchCabinets();
-    if (selectedCabinetIdRef.current) {
-      await fetchQueue(selectedCabinetIdRef.current, true);
+    finishTriggeredRef.current = true;
+    setIsSubmitting(true);
+
+    try {
+      const endpoint = isMod
+        ? `${QUEUE_API_URL}/${currentSession.id}/cycle`
+        : `${QUEUE_API_URL}/${currentSession.id}/finish`;
+
+      await axios.post(endpoint, { owner_id: clientId });
+
+      // Refresh Cabinets to get the new queue state after cycling/finishing
+      await fetchCabinets();
+      setStatusMessage({ type: 'success', text: 'Finished current session.' });
+    } catch (error) {
+      if (error && error.response && error.response.status === 403) {
+        setStatusMessage({ type: 'error', text: 'Permission denied (403): cannot finish game.' });
+      } else {
+        logAxiosDebug(error, 'finishGame');
+        setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
+      }
+    } finally {
+      setIsSubmitting(false);
+      // keep finishTriggeredRef true briefly to avoid immediate retries, then allow future attempts
+      setTimeout(() => { finishTriggeredRef.current = false; }, 2000);
     }
-    setStatusMessage({ type: 'success', text: 'Moved current player to the bottom of the queue.' });
-  } catch (error) {
-    setStatusMessage({ type: 'error', text: 'Failed to finish game.' });
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   // Start hold timer for finish button (3s -> open delete confirmation)
   const startHoldFinishTimer = () => {
@@ -1186,7 +1212,7 @@ export default function ArcadeQueueApp() {
                 </div>
               )}
             </div>
-            {/* <div className="col-span-3 justify-self-center pt-4">
+            <div className="col-span-3 justify-self-center pt-4">
               <h3 className="text-sm text-slate-500 flex items-center gap-2">
                 Time till next in queue:
                 {typeof remainingSeconds === 'number' ? (
@@ -1197,7 +1223,7 @@ export default function ArcadeQueueApp() {
                   <span className="text-xs text-slate-400">—</span>
                 )}
               </h3>
-            </div> */}
+            </div>
             
           </div>
 
